@@ -49,6 +49,7 @@ export function makeFakeClient(beforeEmbed?: (text: string) => Promise<void>): F
 }
 
 export const CHAT_DEFAULTS: Record<string, unknown> = {
+  story: "__none__",
   storyId: "",
   documentsDirectory: "",
   vectorStoreDirectory: "",
@@ -83,7 +84,10 @@ export function makeCtl(
   const ctl = {
     abortSignal: new AbortController().signal,
     client,
-    getPluginConfig: () => ({ get: (key: string) => values[key] }),
+    // Parse with the REAL schematics (as LM Studio does), so schema rules apply in tests,
+    // e.g. a dropdown value that is not among the options is rejected.
+    getPluginConfig: (schematics: { parse: (cfg: { fields: Array<{ key: string; value: unknown }> }) => unknown }) =>
+      schematics.parse({ fields: Object.entries(values).map(([key, value]) => ({ key, value })) }),
     getGlobalPluginConfig: () => ({ get: (key: string) => global[key] ?? "" }),
     createStatus: (state: { status: string; text: string }) => {
       statuses.push({ ...state });

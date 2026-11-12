@@ -44,7 +44,7 @@ This will start the plugin and register it with LM Studio.
 
 **Note:** Settings → Integrations (gear menu) is only for “skip tool confirmation”. Path settings are **not** there.
 
-**Stories (recommended):** create a story per title folder (`node dist/cliIndex.js create-story "/path/to/Title"`) and put its id in the chat's **Story ID** field. See README → Story databases. The legacy Documents/Vector Store Directory fields still work when Story ID is empty.
+**Stories (recommended):** create a story per title folder (`node dist/cliIndex.js create-story "/path/to/Title"`) (or use **Create story from title folder** in the chat sidebar) and pick it in the chat's **Story** dropdown (or type it in **Story ID override**). See README → Story databases. The legacy Documents/Vector Store Directory fields still work when Story ID is empty.
 
 For REST/curl: tools need an explicit `story` argument (there is no synced-config or env-var fallback any more).
 

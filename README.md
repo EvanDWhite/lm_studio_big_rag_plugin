@@ -130,7 +130,18 @@ Paths are set in `package.json` `index` script or via `BIG_RAG_DOCS_DIR` / `BIG_
 
 ## Story databases (multiple isolated indexes)
 
-Each **story** is its own isolated database: one title folder → one index. A chat picks its story with the **Story ID** field; two chats on different stories never see each other's chunks.
+Each **story** is its own isolated database: one title folder → one index. Two chats on different stories never see each other's chunks.
+
+**Picking a story in a chat** (Integrations sidebar → Big RAG):
+- **Story** dropdown: `None (RAG off)` (default for new chats) plus every story that existed when the plugin started.
+- **Story ID override**: type an id to use a story created after the plugin started (or to override the dropdown). Reload the plugin (toggle it off/on, or restart LM Studio) to add new stories to the dropdown.
+- Every reply shows a status line such as `📚 Story: The Salt Kingdom (the-salt-kingdom) · via dropdown`, or `📚 Big RAG is off for this chat` when nothing is selected.
+- If a chat's saved dropdown choice is no longer listed (story deleted, or a different Stories Root after restart), Big RAG shows an error and searches nothing until you pick again.
+- The dropdown is listed at startup from `$BIG_RAG_STORIES_ROOT`, else the Stories Root last used by a chat, else the default (plugins cannot read global settings at startup). Searches always use the current Stories Root setting.
+
+**Creating a story from the chat:** toggle **Create story from title folder**, fill in **New story: title folder** (optional: id, exclude patterns, embedding model), send any message. Then select it via Story ID override (or the dropdown after a reload) and turn the toggle off. Indexing starts on the first message with the story selected.
+
+Open product decisions (REST story argument, overlapping folders, default excludes) are single switches in `src/stories/policy.ts`.
 
 - **Stories Root** (global plugin setting): where story databases live. Empty = `$BIG_RAG_STORIES_ROOT`, else `~/.lmstudio/big-rag-stories`.
 - Layout: `<root>/stories/<storyId>/story.json` (manifest), `index/` (Vectra shards), `.big-rag-failures.json`.
@@ -146,9 +157,9 @@ Each **story** is its own isolated database: one title folder → one index. A c
   Options: `--id`, `--name`, `--model <embedding model>`, `--exclude <glob>` (repeatable; replaces the default), `--chunk-size`, `--chunk-overlap`, `--stories-root`.
 - `story.json` holds the story's source folders (`titleDir` + `sourceDirs`, default `["."]`), `excludePatterns`, `additionalExtensions`, embedding model + dimensions, chunk settings, OCR flag and stats. Edit it to change per-story settings; reindex after changing model or chunking.
 - Every chunk is stamped with `metadata.storyId`; search drops anything not stamped for the chat's story. Reindexing a story also prunes chunks for files that were deleted, moved out, or are now excluded (skipped if a source folder is missing).
-- **Fail closed:** if Story ID is empty and the legacy paths are not both set, or the Story ID does not exist, Big RAG does nothing (no indexing, no search) and the message goes to the model unchanged.
+- **Fail closed:** if no story is selected and the legacy paths are not both set, or the selected story does not exist, Big RAG does nothing (no indexing, no search) and the message goes to the model unchanged.
 
-**Legacy single-store mode** still works: leave Story ID empty and set both **Documents Directory (legacy)** and **Vector Store Directory (legacy)**. Fields marked *(legacy)* apply only in that mode; stories take them from `story.json`.
+**Legacy single-store mode** still works: leave Story at None and Story ID override empty, and set both **Documents Directory (legacy)** and **Vector Store Directory (legacy)**. Fields marked *(legacy)* apply only in that mode; stories take them from `story.json`.
 
 ## Configuration
 

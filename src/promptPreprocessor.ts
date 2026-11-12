@@ -11,7 +11,16 @@ import { runIndexingJob } from "./ingestion/runIndexing";
 import { type IndexingProgress } from "./ingestion/indexManager";
 import { type VectorStore } from "./vectorstore/vectorStore";
 import { type StoryHandle } from "./stories/storyRegistry";
-import { readConfigReaders, resolveStoryTarget } from "./stories/resolveStoryTarget";
+import {
+  ChatConfigUnreadableError,
+  readConfigReaders,
+  resolveStoryTarget,
+  type ConfigReader,
+  type StorySelectionSource,
+} from "./stories/resolveStoryTarget";
+import { resolveStoriesRoot } from "./stories/storyRegistry";
+import { getDropdownState, writeStoriesRootHint } from "./stories/storyDropdown";
+import { handleCreateStoryFromChat } from "./stories/createFromChat";
 import {
   ensureVectorStore,
   formatRagContext,
@@ -138,6 +147,54 @@ async function warnIfContextOverflow(
   }
 }
 
+function globalString(global: ConfigReader | null, key: string): string {
+  const v = global?.get(key);
+  return typeof v === "string" ? v : "";
+}
+
+const SOURCE_LABELS: Record<StorySelectionSource, string> = {
+  "typed-override": "typed Story ID override",
+  dropdown: "dropdown",
+  "legacy-paths": "legacy paths",
+  "tool-argument": "tool argument",
+};
+
+/** One line, shown on every reply, naming the story this chat searches and how it was chosen. */
+export function storyStatusLine(story: StoryHandle, source: StorySelectionSource, storiesRoot: string): string {
+  if (story.kind === "legacy") {
+    return `📚 Legacy store: ${story.indexDir} (via ${SOURCE_LABELS[source]})`;
+  }
+  let line = `📚 Story: ${story.displayName} (${story.id}) · via ${SOURCE_LABELS[source]}`;
+  const dropdown = getDropdownState();
+  if (dropdown && path.resolve(dropdown.storiesRoot) !== path.resolve(storiesRoot)) {
+    line += ` · dropdown lists ${dropdown.storiesRoot}, Stories Root is ${storiesRoot}: reload the plugin to refresh it`;
+  } else if (dropdown && source === "typed-override" && !dropdown.storyIds.includes(story.id)) {
+    line += " · not in the dropdown yet (reload the plugin to list it)";
+  }
+  return line;
+}
+
+async function reportCreateStoryRequest(
+  ctl: PromptPreprocessorController,
+  chat: ConfigReader,
+  storiesRoot: string,
+): Promise<void> {
+  const result = await handleCreateStoryFromChat(chat, storiesRoot);
+  if (result.status === "not-requested") return;
+  if (result.status === "error") {
+    console.warn(`[BigRAG] ${result.message}`);
+    ctl.createStatus({ status: "error", text: result.message });
+    return;
+  }
+  const verb = result.status === "created" ? "Created" : "Already exists:";
+  const text =
+    `${verb} story "${result.story.displayName}" (${result.story.id}) at ${result.story.manifestPath}. ` +
+    `Select it with Story ID override = ${result.story.id} (or the dropdown after a plugin reload), ` +
+    `then turn "Create story from title folder" OFF.`;
+  console.info(`[BigRAG] ${text}`);
+  ctl.createStatus({ status: "done", text });
+}
+
 /**
  * Main prompt preprocessor function
  */
@@ -146,21 +203,42 @@ export async function preprocess(
   userMessage: ChatMessage,
 ): Promise<ChatMessage | string> {
   const userPrompt = userMessage.getText();
-  const { chat: chatConfig, global: globalConfig } = readConfigReaders(ctl);
+  let readers: ReturnType<typeof readConfigReaders>;
+  try {
+    readers = readConfigReaders(ctl);
+  } catch (error) {
+    if (error instanceof ChatConfigUnreadableError) {
+      console.warn(`[BigRAG] ${error.message}`, (error as { cause?: unknown }).cause);
+      ctl.createStatus({ status: "error", text: `📚 ${error.message}` });
+      return userMessage;
+    }
+    throw error;
+  }
+  const { chat: chatConfig, global: globalConfig } = readers;
+
+  // Optional "Create story from title folder" toggle (writes only under the stories root).
+  await reportCreateStoryRequest(ctl, chatConfig, resolveStoriesRoot(globalString(globalConfig, "storiesRoot")));
 
   // Resolve exactly one story DB for this chat. Everything below uses only `story`.
   const target = await resolveStoryTarget({ chat: chatConfig, global: globalConfig });
+  if (globalConfig) {
+    // Lets the next plugin start list stories from the root chats actually use.
+    writeStoriesRootHint(target.storiesRoot);
+  }
   if (!target.ok) {
+    const text = target.message.includes("No search was run") ? target.message : `${target.message} No search was run.`;
     if (target.reason === "not-configured") {
-      console.info(`[BigRAG] ${target.message}`);
+      console.info(`[BigRAG] ${text}`);
+      ctl.createStatus({ status: "done", text: `📚 ${text}` });
     } else {
-      console.warn(`[BigRAG] ${target.message}`);
-      ctl.createStatus({ status: "error", text: `${target.message} No search was run.` });
+      console.warn(`[BigRAG] ${text}`);
+      ctl.createStatus({ status: "error", text: `📚 ${text}` });
     }
     // Fail closed: no indexing, no retrieval, prompt passes through unchanged.
     return userMessage;
   }
   const story = target.story;
+  ctl.createStatus({ status: "done", text: storyStatusLine(target.story, target.source, target.storiesRoot) });
   for (const warning of target.warnings) {
     console.warn(`[BigRAG] ${warning}`);
     ctl.createStatus({ status: "done", text: warning });
@@ -173,9 +251,6 @@ export async function preprocess(
   const reindexRequested = chatConfig.get("manualReindex.trigger") === true;
   const skipPreviouslyIndexed = chatConfig.get("manualReindex.skipPreviouslyIndexed") !== false;
   const resolvedEmbeddingModelId = story.embeddingModelId;
-  const storyLabel = story.kind === "story" ? `Story: ${story.displayName} (${story.id})` : story.displayName;
-
-  ctl.createStatus({ status: "done", text: `📚 ${storyLabel}` });
 
   if (story.sourceDirs.length === 0) {
     console.warn("[BigRAG] No source folders configured for this story.");
@@ -312,7 +387,7 @@ export async function preprocess(
       await deleteEmbeddingIndexManifest(story.indexDir);
       ctl.createStatus({
         status: "canceled",
-        text: "No documents indexed yet",
+        text: `No documents indexed yet in ${story.displayName}`,
       });
       const noteAboutEmptyIndex =
         `Important: The document index is empty (no chunks stored yet). ` +
@@ -371,7 +446,7 @@ export async function preprocess(
     if (results.length === 0) {
       retrievalStatus.setState({
         status: "canceled",
-        text: "No relevant content found in indexed documents",
+        text: `No relevant content found in ${story.displayName}`,
       });
 
       const noteAboutNoResults =
@@ -384,7 +459,7 @@ export async function preprocess(
 
     retrievalStatus.setState({
       status: "done",
-      text: `Retrieved ${results.length} relevant passages`,
+      text: `Retrieved ${results.length} relevant passages from ${story.displayName}`,
     });
 
     ctl.debug("Retrieval results:", results);

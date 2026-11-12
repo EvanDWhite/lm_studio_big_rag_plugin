@@ -16,18 +16,101 @@ User Query:
 
 {{user_query}}`;
 
-export const configSchematics = createConfigSchematics()
+/** Dropdown value meaning "no story": retrieval off (unless the typed override or legacy paths are set). */
+export const NO_STORY_VALUE = "__none__";
+
+export interface StoryOption {
+  value: string;
+  displayName: string;
+}
+
+/**
+ * Build the per-chat schematics. The story dropdown's options are fixed at build time (an SDK
+ * limitation), so the plugin builds this once at startup from the story list; see
+ * stories/storyDropdown.ts. Stories created later are reachable via the typed Story ID override.
+ */
+export function buildConfigSchematics(storyOptions: readonly StoryOption[] = []) {
+  return createConfigSchematics()
+  .field(
+    "story",
+    "select",
+    {
+      displayName: "Story",
+      subtitle:
+        "Story database for THIS chat. Retrieval only ever searches the selected story. The list is read when the " +
+        "plugin starts; reload the plugin (or use Story ID override below) for stories created since.",
+      options: [{ value: NO_STORY_VALUE, displayName: "None (RAG off)" }, ...storyOptions],
+    },
+    NO_STORY_VALUE,
+  )
   .field(
     "storyId",
     "string",
     {
-      displayName: "Story ID",
+      displayName: "Story ID override",
       subtitle:
-        "Story database for THIS chat (e.g. the-salt-kingdom). Stories live under the global Stories Root " +
-        "(<root>/stories/<id>/story.json); create one with `node dist/cliIndex.js create-story <titleDir>`. " +
-        "When set, the story's own source folders, excludes, embedding model and chunk settings are used and the " +
-        "legacy fields below are ignored. Leave empty AND leave the legacy paths empty to turn retrieval off.",
+        "Optional. Typed story id (e.g. the-salt-kingdom); when set it wins over the dropdown. Use it for stories " +
+        "created after the plugin started. Stories live under the global Stories Root (<root>/stories/<id>/story.json). " +
+        "When a story is selected, its own source folders, excludes, embedding model and chunk settings are used and " +
+        "the legacy fields below are ignored.",
       placeholder: "the-salt-kingdom",
+    },
+    "",
+  )
+  .field(
+    "newStory.create",
+    "boolean",
+    {
+      displayName: "Create story from title folder",
+      subtitle:
+        "Toggle ON, fill in the title folder below and send a message: a new story is created (every subfolder " +
+        "indexed except chapter_raw). It does not auto-reset; turn it OFF afterwards. Then select the story " +
+        "(Story ID override now, or the dropdown after a plugin reload).",
+    },
+    false,
+  )
+  .field(
+    "newStory.titleDir",
+    "string",
+    {
+      displayName: "New story: title folder",
+      subtitle: "Absolute path of the title folder (e.g. /Users/me/Writing/The Salt Kingdom).",
+      placeholder: "/path/to/Title Folder",
+      dependencies: [{ key: "newStory.create", condition: { type: "equals", value: true } }],
+    },
+    "",
+  )
+  .field(
+    "newStory.id",
+    "string",
+    {
+      displayName: "New story: id (optional)",
+      subtitle: "Defaults to the folder name as a slug (\"The Salt Kingdom\" -> the-salt-kingdom).",
+      placeholder: "the-salt-kingdom",
+      dependencies: [{ key: "newStory.create", condition: { type: "equals", value: true } }],
+    },
+    "",
+  )
+  .field(
+    "newStory.excludePatterns",
+    "string",
+    {
+      displayName: "New story: exclude patterns (optional)",
+      subtitle: "One glob per line, relative to the title folder. Empty = default (**/chapter_raw/**).",
+      placeholder: "**/chapter_raw/**",
+      isParagraph: true,
+      dependencies: [{ key: "newStory.create", condition: { type: "equals", value: true } }],
+    },
+    "",
+  )
+  .field(
+    "newStory.embeddingModel",
+    "string",
+    {
+      displayName: "New story: embedding model (optional)",
+      subtitle: `Empty = ${DEFAULT_EMBEDDING_MODEL_ID}. Fixed per story (recorded in story.json).`,
+      placeholder: DEFAULT_EMBEDDING_MODEL_ID,
+      dependencies: [{ key: "newStory.create", condition: { type: "equals", value: true } }],
     },
     "",
   )
@@ -219,6 +302,23 @@ export const configSchematics = createConfigSchematics()
     DEFAULT_PROMPT_TEMPLATE,
   )
   .build();
+}
+
+export type BigRagConfigSchematics = ReturnType<typeof buildConfigSchematics>;
+
+let activeConfigSchematics: BigRagConfigSchematics = buildConfigSchematics();
+
+/**
+ * The schematics instance registered with LM Studio. Always read config through this so
+ * getPluginConfig() receives the same instance that was registered at startup.
+ */
+export function getConfigSchematics(): BigRagConfigSchematics {
+  return activeConfigSchematics;
+}
+
+export function setActiveConfigSchematics(schematics: BigRagConfigSchematics): void {
+  activeConfigSchematics = schematics;
+}
 
 
 /** Application-wide settings (plugin management screen). */

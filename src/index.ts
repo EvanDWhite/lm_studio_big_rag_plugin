@@ -1,5 +1,6 @@
 import { type PluginContext } from "@lmstudio/sdk";
-import { configSchematics, globalConfigSchematics } from "./config";
+import { globalConfigSchematics } from "./config";
+import { initStoryDropdown } from "./stories/storyDropdown";
 import { preprocess } from "./promptPreprocessor";
 import { provideTools } from "./toolsProvider";
 
@@ -8,7 +9,8 @@ import { provideTools } from "./toolsProvider";
  * This plugin indexes large document collections and provides RAG capabilities.
  */
 export async function main(context: PluginContext) {
-  context.withConfigSchematics(configSchematics);
+  // Per-chat schematics include a story dropdown listed once, here, at startup.
+  context.withConfigSchematics(await initStoryDropdown());
   context.withGlobalConfigSchematics(globalConfigSchematics);
   
   // Register the prompt preprocessor

@@ -4,6 +4,7 @@ import { createHash } from "crypto";
 import { homedir } from "os";
 import * as path from "path";
 import { DEFAULT_EMBEDDING_MODEL_ID, resolveEmbeddingModelId } from "../config";
+import { DEFAULT_STORY_POLICY, getStoryPolicy, type StoryPolicy } from "./policy";
 
 /**
  * Story databases ("story DBs").
@@ -22,8 +23,8 @@ export const STORY_FAILURES_FILENAME = ".big-rag-failures.json";
 export const STORY_SCHEMA_VERSION = 1;
 export const STORIES_SUBDIR = "stories";
 export const STORIES_ROOT_ENV = "BIG_RAG_STORIES_ROOT";
-/** Default excludes for a new story: never index the raw chapter duplicates, at any depth. */
-export const DEFAULT_STORY_EXCLUDES: readonly string[] = ["**/chapter_raw/**"];
+/** Default excludes for a new story (see policy.ts). */
+export const DEFAULT_STORY_EXCLUDES: readonly string[] = DEFAULT_STORY_POLICY.defaultExcludePatterns;
 export const DEFAULT_CHUNK_SIZE = 512;
 export const DEFAULT_CHUNK_OVERLAP = 100;
 
@@ -275,7 +276,11 @@ export interface CreateStoryOptions {
 }
 
 /** Create a new story (fails if it already exists). */
-export async function createStory(storiesRoot: string, options: CreateStoryOptions): Promise<StoryHandle> {
+export async function createStory(
+  storiesRoot: string,
+  options: CreateStoryOptions,
+  policy: Readonly<StoryPolicy> = getStoryPolicy(),
+): Promise<StoryHandle> {
   const id = options.id ?? (options.titleDir ? slugifyStoryId(path.basename(path.resolve(options.titleDir))) : "");
   const storyDir = getStoryDir(storiesRoot, id);
   const manifestPath = path.join(storyDir, STORY_MANIFEST_FILENAME);
@@ -288,7 +293,7 @@ export async function createStory(storiesRoot: string, options: CreateStoryOptio
     displayName: options.displayName ?? (options.titleDir ? path.basename(path.resolve(options.titleDir)) : id),
     titleDir: options.titleDir ? path.resolve(options.titleDir) : undefined,
     sourceDirs: options.sourceDirs,
-    excludePatterns: options.excludePatterns,
+    excludePatterns: options.excludePatterns ?? [...policy.defaultExcludePatterns],
     additionalExtensions: options.additionalExtensions,
     embedding: { modelId: options.embeddingModelId ?? DEFAULT_EMBEDDING_MODEL_ID, dimensions: null },
     chunking: {
@@ -303,7 +308,9 @@ export async function createStory(storiesRoot: string, options: CreateStoryOptio
   if (typeof manifest === "string") {
     throw new Error(`Cannot create story "${id}": ${manifest}.`);
   }
-  await assertNoTitleOverlap(storiesRoot, id, storyHandleFromManifest(storyDir, manifest).sourceDirs);
+  if (policy.rejectOverlappingSources) {
+    await assertNoTitleOverlap(storiesRoot, id, storyHandleFromManifest(storyDir, manifest).sourceDirs);
+  }
   await writeJsonAtomic(manifestPath, manifest);
   return storyHandleFromManifest(storyDir, manifest);
 }

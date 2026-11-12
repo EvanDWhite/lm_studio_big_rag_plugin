@@ -1,7 +1,12 @@
 import { tool, type Tool, type ToolsProviderController } from "@lmstudio/sdk";
 import { z } from "zod";
 import { getIndexStatus, retrievePassages } from "./rag/retrieval";
-import { readConfigReaders, resolveStoryTarget, type StoryTarget } from "./stories/resolveStoryTarget";
+import {
+  ChatConfigUnreadableError,
+  readConfigReaders,
+  resolveStoryTarget,
+  type StoryTarget,
+} from "./stories/resolveStoryTarget";
 
 /**
  * Tools resolve their story exactly like the prompt preprocessor: from THIS chat's config (Story
@@ -10,18 +15,28 @@ import { readConfigReaders, resolveStoryTarget, type StoryTarget } from "./stori
  * call can never switch a chat to a different story than the one it is bound to.
  */
 async function resolveForTool(ctl: ToolsProviderController, story?: string): Promise<StoryTarget> {
-  const { chat, global } = readConfigReaders(ctl);
-  return resolveStoryTarget({ chat, global, explicitStoryId: story });
+  let readers: ReturnType<typeof readConfigReaders>;
+  try {
+    readers = readConfigReaders(ctl);
+  } catch (error) {
+    if (error instanceof ChatConfigUnreadableError) {
+      return { ok: false, reason: "invalid-manifest", message: error.message, storiesRoot: "" };
+    }
+    throw error;
+  }
+  return resolveStoryTarget({ chat: readers.chat, global: readers.global, explicitStoryId: story });
 }
 
 function targetError(target: Exclude<StoryTarget, { ok: true }>): string {
   if (target.reason === "not-configured") {
     return (
-      "Error: No story selected. Set Story ID in this chat's Big RAG settings, or pass the `story` " +
+      "Error: No story selected. Select a Story in this chat's Big RAG settings, or pass the `story` " +
       "argument (REST). No search was run."
     );
   }
-  return `Error: ${target.message} No search was run.`;
+  return target.message.includes("No search was run")
+    ? `Error: ${target.message}`
+    : `Error: ${target.message} No search was run.`;
 }
 
 const storyParam = z
@@ -61,7 +76,7 @@ export async function provideTools(ctl: ToolsProviderController): Promise<Tool[]
         return targetError(target);
       }
 
-      const { chat } = readConfigReaders(ctl);
+      const { chat } = readConfigReaders(ctl); // already parsed successfully in resolveForTool
       const configuredLimit = chat.get("retrievalLimit");
       const configuredThreshold = chat.get("retrievalAffinityThreshold");
       const retrievalLimit = limit ?? (typeof configuredLimit === "number" ? configuredLimit : 5);
