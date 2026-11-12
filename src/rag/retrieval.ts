@@ -7,9 +7,17 @@ import {
   deleteEmbeddingIndexManifest,
 } from "../utils/embeddingIndexManifest";
 
-let cachedVectorStore: VectorStore | null = null;
-let lastVectorStoreDir = "";
-let vectorStoreOpenMutex: Promise<void> = Promise.resolve();
+/**
+ * Open vector stores keyed by resolved directory.
+ *
+ * Each chat / tool call must use the instance returned by `ensureVectorStore(dir)` for its own
+ * directory. There is intentionally no "current store" accessor: a process-wide singleton let a
+ * concurrent chat with a different vectorStoreDir swap (and close) the store out from under an
+ * in-flight request, so one chat could index into another chat's store.
+ */
+const openVectorStores = new Map<string, VectorStore>();
+/** Per-directory open promises so concurrent opens of the same dir share one initialization. */
+const pendingVectorStoreOpens = new Map<string, Promise<VectorStore>>();
 
 function throwIfAborted(abortSignal: AbortSignal | undefined): void {
   if (abortSignal?.aborted) {
@@ -17,59 +25,61 @@ function throwIfAborted(abortSignal: AbortSignal | undefined): void {
   }
 }
 
-export function getCachedVectorStore(): VectorStore | null {
-  return cachedVectorStore;
+async function openVectorStore(resolvedDir: string): Promise<VectorStore> {
+  const nextStore = new VectorStore(resolvedDir);
+  try {
+    await nextStore.initialize();
+    const statsAfterInit = await nextStore.getStats();
+    if (statsAfterInit.totalChunks === 0) {
+      await deleteEmbeddingIndexManifest(resolvedDir);
+    }
+  } catch (error: unknown) {
+    try {
+      await nextStore.close();
+    } catch {
+      // Ignore close errors after a failed open.
+    }
+    throw error;
+  }
+  console.info(`[BigRAG] Vector store ready (path=${resolvedDir}). Waiting for queries...`);
+  return nextStore;
 }
 
 /**
  * Open or reuse the in-memory vector store for the given directory.
+ * Stores for other directories are left open, so callers holding them are unaffected.
  */
 export async function ensureVectorStore(vectorStoreDir: string): Promise<VectorStore> {
   const resolvedDir = path.resolve(vectorStoreDir);
 
-  let openedStore: VectorStore | null = null;
-  const openWork = vectorStoreOpenMutex
-    .catch((): void => undefined)
-    .then(async (): Promise<void> => {
-      if (cachedVectorStore && lastVectorStoreDir === resolvedDir) {
-        openedStore = cachedVectorStore;
-        return;
-      }
-      if (cachedVectorStore !== null && lastVectorStoreDir !== resolvedDir) {
-        await cachedVectorStore.close();
-        cachedVectorStore = null;
-        lastVectorStoreDir = "";
-      }
-      const nextStore = new VectorStore(resolvedDir);
-      try {
-        await nextStore.initialize();
-        const statsAfterInit = await nextStore.getStats();
-        if (statsAfterInit.totalChunks === 0) {
-          await deleteEmbeddingIndexManifest(resolvedDir);
-        }
-      } catch (error: unknown) {
-        try {
-          await nextStore.close();
-        } catch {
-          // Ignore close errors after a failed open.
-        }
-        throw error;
-      }
-      cachedVectorStore = nextStore;
-      lastVectorStoreDir = resolvedDir;
-      console.info(`[BigRAG] Vector store ready (path=${resolvedDir}). Waiting for queries...`);
-      openedStore = cachedVectorStore;
-    });
-  vectorStoreOpenMutex = openWork.then(
-    (): void => undefined,
-    (): void => undefined,
-  );
-  await openWork;
-
-  if (openedStore === null) {
-    throw new Error(`Failed to open vector store at ${resolvedDir}`);
+  const existing = openVectorStores.get(resolvedDir);
+  if (existing) {
+    return existing;
   }
-  return openedStore;
+
+  let pending = pendingVectorStoreOpens.get(resolvedDir);
+  if (!pending) {
+    pending = openVectorStore(resolvedDir)
+      .then((store) => {
+        openVectorStores.set(resolvedDir, store);
+        return store;
+      })
+      .finally(() => {
+        pendingVectorStoreOpens.delete(resolvedDir);
+      });
+    pendingVectorStoreOpens.set(resolvedDir, pending);
+  }
+  return pending;
+}
+
+/** @internal Test helper: drop all cached stores (does not touch disk). */
+export async function resetVectorStoreCacheForTest(): Promise<void> {
+  const stores = Array.from(openVectorStores.values());
+  openVectorStores.clear();
+  pendingVectorStoreOpens.clear();
+  for (const store of stores) {
+    await store.close();
+  }
 }
 
 export function summarizeText(text: string, maxLines: number = 3, maxChars: number = 400): string {

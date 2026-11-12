@@ -52,7 +52,8 @@ test("mergeChatAndSyncedFileSettings prefers chat paths when both are set", () =
   assert.equal(merged.retrievalLimit, 3);
 });
 
-test("mergeChatAndSyncedFileSettings ignores partial chat paths to avoid cross-project mix", () => {
+test("mergeChatAndSyncedFileSettings does not borrow synced paths when chat paths are partial", () => {
+  // A partially configured chat must not silently search the last-used chat's store.
   const merged = mergeChatAndSyncedFileSettingsForTest(
     {
       documentsDirectory: "/chat/docs",
@@ -64,8 +65,21 @@ test("mergeChatAndSyncedFileSettings ignores partial chat paths to avoid cross-p
     },
   );
 
-  assert.equal(merged.documentsDirectory, "/synced/docs");
-  assert.equal(merged.vectorStoreDirectory, "/synced/store");
+  assert.equal(merged.documentsDirectory, "/chat/docs");
+  assert.equal(merged.vectorStoreDirectory, "");
+
+  const storeOnly = mergeChatAndSyncedFileSettingsForTest(
+    {
+      documentsDirectory: "",
+      vectorStoreDirectory: "/chat/store",
+    },
+    {
+      documentsDirectory: "/synced/docs",
+      vectorStoreDirectory: "/synced/store",
+    },
+  );
+  assert.equal(storeOnly.documentsDirectory, "");
+  assert.equal(storeOnly.vectorStoreDirectory, "/chat/store");
 });
 
 test("mergeEmbeddingModelPreference keeps custom synced model over chat default", () => {

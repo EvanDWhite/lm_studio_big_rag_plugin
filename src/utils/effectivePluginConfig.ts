@@ -54,6 +54,17 @@ function chatPathsConfigured(chatConfig: ToolsConfigReader): boolean {
 }
 
 /**
+ * True when the chat sets exactly one of the two paths. That only happens inside a real chat
+ * (REST calls have no chat config, so both are empty), and in that case we must not borrow the
+ * synced "last used chat" paths: that could silently search a different project's store.
+ */
+function chatPathsPartiallyConfigured(chatConfig: ToolsConfigReader): boolean {
+  const hasDocs = pickNonEmptyString(chatConfig.get("documentsDirectory") as string, "") !== "";
+  const hasStore = pickNonEmptyString(chatConfig.get("vectorStoreDirectory") as string, "") !== "";
+  return hasDocs !== hasStore;
+}
+
+/**
  * Prefer a custom synced embedding over the chat schematic default so REST-only
  * custom models are not clobbered on the first chat message.
  */
@@ -302,6 +313,11 @@ export function readToolsPluginSettings(ctl: PluginConfigAccess): ToolsPluginSet
     return mergedChatSettings;
   }
 
+  if (chatPathsPartiallyConfigured(chatReader)) {
+    // Fail closed: use only this chat's own values (callers report the missing path).
+    return chatSettings;
+  }
+
   const syncedSettings = readSyncedToolsSettingsFile();
   const baseSettings = syncedSettings ?? EMPTY_TOOLS_SETTINGS;
 
@@ -331,6 +347,10 @@ export function mergeChatAndSyncedFileSettingsForTest(
       chatValues.retrievalAffinityThreshold as number | undefined,
     ),
   };
+
+  if (chatPathsPartiallyConfigured(chatReader)) {
+    return chatSettings;
+  }
 
   if (!chatPathsConfigured(chatReader)) {
     return {

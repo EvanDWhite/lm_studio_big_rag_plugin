@@ -8,6 +8,7 @@ import { tryStartIndexing, finishIndexing } from "./utils/indexingLock";
 import { deleteEmbeddingIndexManifest } from "./utils/embeddingIndexManifest";
 import * as path from "path";
 import { runIndexingJob } from "./ingestion/runIndexing";
+import { type VectorStore } from "./vectorstore/vectorStore";
 import { parseExcludePatternsBlock } from "./utils/fileExcludePatterns";
 import { resolveAdditionalExtensions } from "./utils/additionalExtensions";
 import { parseDocumentPaths } from "./utils/documentPaths";
@@ -15,7 +16,6 @@ import { syncChatToolsSettingsForRest } from "./utils/effectivePluginConfig";
 import {
   ensureVectorStore,
   formatRagContext,
-  getCachedVectorStore,
   retrievePassages,
   summarizeText,
 } from "./rag/retrieval";
@@ -217,23 +217,21 @@ export async function preprocess(
     checkAbort(ctl.abortSignal);
 
     // Initialize vector store if needed
+    let vectorStore: VectorStore;
     {
       const status = ctl.createStatus({
         status: "loading",
         text: "Initializing vector store...",
       });
 
-      await ensureVectorStore(vectorStoreDir);
+      // Use the instance opened for THIS chat's vectorStoreDir for every step below
+      // (reindex, auto-index, stats). Never re-read shared state: another chat with a
+      // different vectorStoreDir may be running concurrently.
+      vectorStore = await ensureVectorStore(vectorStoreDir);
       status.setState({
         status: "done",
         text: "Vector store initialized",
       });
-    }
-
-    const vectorStore = getCachedVectorStore();
-    if (!vectorStore) {
-      console.error("[BigRAG] Vector store failed to initialize.");
-      return userMessage;
     }
 
     checkAbort(ctl.abortSignal);
@@ -252,6 +250,7 @@ export async function preprocess(
       excludePatterns,
       additionalPlainTextExtensions,
       skipPreviouslyIndexed: pluginConfig.get("manualReindex.skipPreviouslyIndexed"),
+      vectorStore,
     });
 
     checkAbort(ctl.abortSignal);
@@ -492,6 +491,8 @@ interface ConfigReindexOpts {
   excludePatterns: string[];
   additionalPlainTextExtensions: ReadonlySet<string>;
   skipPreviouslyIndexed: boolean;
+  /** Store opened for this chat's vectorStoreDir; indexing must write only here. */
+  vectorStore: VectorStore;
 }
 
 async function maybeHandleConfigTriggeredReindex({
@@ -508,6 +509,7 @@ async function maybeHandleConfigTriggeredReindex({
   excludePatterns,
   additionalPlainTextExtensions,
   skipPreviouslyIndexed,
+  vectorStore,
 }: ConfigReindexOpts) {
   if (!reindexRequested) {
     return;
@@ -552,7 +554,7 @@ async function maybeHandleConfigTriggeredReindex({
       excludePatterns,
       additionalPlainTextExtensions,
       forceReindex: !skipPreviouslyIndexed,
-      vectorStore: getCachedVectorStore() ?? undefined,
+      vectorStore,
       onProgress: (progress) => {
         if (progress.status === "scanning") {
           status.setState({
