@@ -99,7 +99,7 @@ test("selecting a story in the dropdown searches only that story, with a status 
   const prompt = textOf(await preprocess(chat.ctl, userMessage("vexmora saga")));
   assert.ok(prompt.includes("Citation") && prompt.includes("vexmora") && !prompt.includes("ilsanebula"));
   assert.ok(!prompt.includes("RAWDUP"));
-  assert.ok(statusTexts(chat.statuses).includes("📚 Story: The Salt Kingdom (the-salt-kingdom) · via dropdown"));
+  assert.ok(statusTexts(chat.statuses).includes("📚 Big RAG Stories · The Salt Kingdom (the-salt-kingdom) · via dropdown"));
   assert.ok(statusTexts(chat.statuses).includes("from The Salt Kingdom"));
   assert.equal(readStoriesRootHint(), storiesRoot, "chat records the root it used for the next startup");
 });
@@ -108,7 +108,7 @@ test("typed Story ID override wins over the dropdown", async () => {
   const chat = makeCtl({ story: alpha.id, storyId: beta.id }, makeFakeClient(), { storiesRoot });
   const prompt = textOf(await preprocess(chat.ctl, userMessage("saga")));
   assert.ok(prompt.includes("ilsanebula") && !prompt.includes("vexmora"));
-  assert.ok(statusTexts(chat.statuses).includes("📚 Story: Brass Nebula (brass-nebula) · via typed Story ID override"));
+  assert.ok(statusTexts(chat.statuses).includes("📚 Big RAG Stories · Brass Nebula (brass-nebula) · via typed Story ID override"));
 });
 
 test("a story created after startup is usable via the typed override and flagged as not in the dropdown", async () => {
@@ -127,7 +127,7 @@ test("dropdown None and no override: RAG off, status says so, message unchanged"
   const message = userMessage("vexmora");
   assert.equal(await preprocess(chat.ctl, message), message);
   assert.equal(client.calls.embeds, 0);
-  assert.ok(statusTexts(chat.statuses).includes("📚 Big RAG is off for this chat: no story selected. No search was run."));
+  assert.ok(statusTexts(chat.statuses).includes("📚 Big RAG Stories is off for this chat: no story selected. No search was run."));
 });
 
 test("a saved dropdown value that is no longer listed fails closed instead of crashing", async () => {

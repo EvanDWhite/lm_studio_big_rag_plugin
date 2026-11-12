@@ -1,0 +1,30 @@
+# Build + test on every push and pull request. Needs no secrets.
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22 # LM Studio's plugin runtime is Node 22
+          cache: npm
+      - run: npm ci
+      - run: npm test # tsc build + esbuild bundle + node:test suite
+      - name: Validate manifest.json (LM Studio owner/name rules)
+        run: |
+          node -e '
+            const m = require("./manifest.json");
+            const kebab = /^[a-z0-9]+(?:-[a-z0-9]+)*$/, kebabDots = /^[a-z0-9]+(?:[-.][a-z0-9]+)*$/;
+            if (m.type !== "plugin" || !kebab.test(m.owner) || !kebabDots.test(m.name)) { console.error("bad manifest", m); process.exit(1); }
+            console.log(`plugin id: ${m.owner}/${m.name}`);
+          '

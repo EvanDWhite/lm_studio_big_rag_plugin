@@ -194,13 +194,13 @@ export function resolveAdditionalExtensions(
         const warning =
           `Extension ${normalized} is already handled by a built-in parser; ignoring additional declaration.`;
         warnings.push(warning);
-        log?.(`[BigRAG] ${warning}`);
+        log?.(`[BigRAG-Stories] ${warning}`);
         continue;
       }
       const warning =
         `Extension ${normalized} is already included in built-in supported types; no need to declare it again.`;
       warnings.push(warning);
-      log?.(`[BigRAG] ${warning}`);
+      log?.(`[BigRAG-Stories] ${warning}`);
       continue;
     }
 
@@ -209,7 +209,7 @@ export function resolveAdditionalExtensions(
   }
 
   for (const item of rejected) {
-    log?.(`[BigRAG] Rejected additional extension ${item.ext}: ${item.reason}`);
+    log?.(`[BigRAG-Stories] Rejected additional extension ${item.ext}: ${item.reason}`);
   }
 
   return {

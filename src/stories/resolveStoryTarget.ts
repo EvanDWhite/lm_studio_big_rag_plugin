@@ -132,7 +132,7 @@ export async function resolveStoryTarget(input: ResolveStoryTargetInput): Promis
   if (docsRaw || storeRaw) {
     return fail(
       "not-configured",
-      "Big RAG: select a Story, or set BOTH legacy Documents Directory and Vector Store Directory. No search was run.",
+      "Big RAG Stories: select a Story, or set BOTH legacy Documents Directory and Vector Store Directory. No search was run.",
     );
   }
 
@@ -145,7 +145,7 @@ export async function resolveStoryTarget(input: ResolveStoryTargetInput): Promis
     return { ok: true, story: loaded.story, storiesRoot, source: "tool-argument", warnings };
   }
 
-  return fail("not-configured", "Big RAG is off for this chat: no story selected. No search was run.");
+  return fail("not-configured", "Big RAG Stories is off for this chat: no story selected. No search was run.");
 }
 
 /** Controllers that expose plugin config (prompt preprocessor, tools provider). */
@@ -163,7 +163,7 @@ export interface PluginConfigSource {
 export class ChatConfigUnreadableError extends Error {
   constructor(cause: unknown) {
     super(
-      "Big RAG could not read this chat's settings. Most likely the selected Story is no longer in the " +
+      "Big RAG Stories could not read this chat's settings. Most likely the selected Story is no longer in the " +
         "dropdown (deleted, or the plugin restarted with a different Stories Root). Pick a story again or use " +
         "Story ID override. No search was run.",
     );
@@ -184,7 +184,7 @@ export function readConfigReaders(ctl: PluginConfigSource): { chat: ConfigReader
     const g = ctl.getGlobalPluginConfig?.(globalConfigSchematics);
     if (g) global = { get: (key: string) => g.get(key as never) };
   } catch (error) {
-    console.warn("[BigRAG] Could not read global plugin config; using default stories root.", error);
+    console.warn("[BigRAG-Stories] Could not read global plugin config; using default stories root.", error);
   }
   return { chat: { get: (key: string) => chatConfig.get(key as never) }, global };
 }

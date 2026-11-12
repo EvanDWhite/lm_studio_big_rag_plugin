@@ -106,10 +106,10 @@ test("preprocess with only one legacy path set fails closed", async () => {
 test("tools with no chat story and no story argument refuse (no synced-file or env fallback)", async () => {
   const client = makeFakeClient();
   const tools = await provideTools(makeCtl({}, client, { storiesRoot }).ctl);
-  const search = await callTool(tools, "big_rag_search", { query: "vexmora" });
+  const search = await callTool(tools, "big_rag_stories_search", { query: "vexmora" });
   assert.equal(typeof search, "string");
   assert.match(search, /^Error: No story selected/);
-  const status = await callTool(tools, "big_rag_index_status", {});
+  const status = await callTool(tools, "big_rag_stories_index_status", {});
   assert.match(status, /^Error: No story selected/);
   assert.equal(client.calls.embeds, 0);
 });
@@ -117,11 +117,11 @@ test("tools with no chat story and no story argument refuse (no synced-file or e
 test("a chat bound to one story cannot be redirected to another via the tool argument", async () => {
   const client = makeFakeClient();
   const tools = await provideTools(makeCtl({ storyId: alpha.id }, client, { storiesRoot }).ctl);
-  const refused = await callTool(tools, "big_rag_search", { query: "ilsanebula", story: beta.id });
+  const refused = await callTool(tools, "big_rag_stories_search", { query: "ilsanebula", story: beta.id });
   assert.match(refused, /bound to story "alpha"/);
   assert.equal(client.calls.embeds, 0);
 
-  const own = await callTool(tools, "big_rag_search", { query: "saga" });
+  const own = await callTool(tools, "big_rag_stories_search", { query: "saga" });
   assert.equal(own.story, alpha.id);
   assert.ok(own.passageCount > 0);
   assert.ok(own.passages.every((p: { text: string }) => p.text.includes("vexmora")));
@@ -129,19 +129,19 @@ test("a chat bound to one story cannot be redirected to another via the tool arg
   const legacyTools = await provideTools(
     makeCtl({ documentsDirectory: "/d", vectorStoreDirectory: path.join(base, "legacy") }, client, { storiesRoot }).ctl,
   );
-  assert.match(await callTool(legacyTools, "big_rag_search", { query: "x", story: beta.id }), /legacy vector store/);
+  assert.match(await callTool(legacyTools, "big_rag_stories_search", { query: "x", story: beta.id }), /legacy vector store/);
 });
 
 test("REST-style call (no chat config) with an explicit story searches only that story", async () => {
   const tools = await provideTools(makeCtl({}, makeFakeClient(), { storiesRoot }).ctl);
-  const result = await callTool(tools, "big_rag_search", { query: "saga", story: beta.id });
+  const result = await callTool(tools, "big_rag_stories_search", { query: "saga", story: beta.id });
   assert.equal(result.story, beta.id);
   assert.ok(result.passageCount > 0);
   assert.ok(result.passages.every((p: { text: string }) => p.text.includes("ilsanebula") && !p.text.includes("vexmora")));
 
-  const status = await callTool(tools, "big_rag_index_status", { story: beta.id });
+  const status = await callTool(tools, "big_rag_stories_index_status", { story: beta.id });
   assert.equal(status.storyId, beta.id);
   assert.equal(status.uniqueFiles, 1);
 
-  assert.match(await callTool(tools, "big_rag_search", { query: "saga", story: "missing" }), /not found/);
+  assert.match(await callTool(tools, "big_rag_stories_search", { query: "saga", story: "missing" }), /not found/);
 });

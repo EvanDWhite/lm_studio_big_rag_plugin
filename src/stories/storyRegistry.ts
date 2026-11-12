@@ -1,3 +1,4 @@
+import { PLUGIN_NAME } from "../identity";
 import * as fs from "fs";
 import * as fsp from "fs/promises";
 import { createHash } from "crypto";
@@ -97,6 +98,14 @@ export type LoadStoryResult =
   | { ok: true; story: StoryHandle; manifest: StoryManifest }
   | { ok: false; reason: "invalid-id" | "not-found" | "invalid-manifest"; message: string };
 
+/**
+ * Default stories root, named after this plugin (~/.lmstudio/big-rag-stories). Upstream Big RAG
+ * never reads or writes it, so the two plugins can't contaminate each other's stories.
+ */
+export function defaultStoriesRoot(): string {
+  return path.join(homedir(), ".lmstudio", PLUGIN_NAME);
+}
+
 export function resolveStoriesRoot(
   configured: string | undefined | null,
   environment: NodeJS.ProcessEnv = process.env,
@@ -105,7 +114,7 @@ export function resolveStoriesRoot(
   if (fromConfig) return path.resolve(expandHome(fromConfig));
   const fromEnv = (environment[STORIES_ROOT_ENV] ?? "").trim();
   if (fromEnv) return path.resolve(expandHome(fromEnv));
-  return path.join(homedir(), ".lmstudio", "big-rag-stories");
+  return defaultStoriesRoot();
 }
 
 function expandHome(p: string): string {

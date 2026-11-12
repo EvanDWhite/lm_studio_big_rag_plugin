@@ -1,3 +1,4 @@
+import { TOOL_INDEX_STATUS, TOOL_SEARCH } from "./identity";
 import { tool, type Tool, type ToolsProviderController } from "@lmstudio/sdk";
 import { z } from "zod";
 import { getIndexStatus, retrievePassages } from "./rag/retrieval";
@@ -30,7 +31,7 @@ async function resolveForTool(ctl: ToolsProviderController, story?: string): Pro
 function targetError(target: Exclude<StoryTarget, { ok: true }>): string {
   if (target.reason === "not-configured") {
     return (
-      "Error: No story selected. Select a Story in this chat's Big RAG settings, or pass the `story` " +
+      "Error: No story selected. Select a Story in this chat's Big RAG Stories settings, or pass the `story` " +
       "argument (REST). No search was run."
     );
   }
@@ -48,9 +49,9 @@ const storyParam = z
 
 export async function provideTools(ctl: ToolsProviderController): Promise<Tool[]> {
   const searchTool = tool({
-    name: "big_rag_search",
+    name: TOOL_SEARCH,
     description:
-      "Search the Big RAG story database selected for this chat for passages relevant to a query. " +
+      "Search the Big RAG Stories database selected for this chat for passages relevant to a query. " +
       "Returns matching text snippets with file names and similarity scores.",
     parameters: {
       query: z.string().describe("Natural-language search query"),
@@ -93,7 +94,7 @@ export async function provideTools(ctl: ToolsProviderController): Promise<Tool[]
 
       if (!result.ok) {
         if (result.logMessage) {
-          console.error("[BigRAG]", result.logMessage);
+          console.error("[BigRAG-Stories]", result.logMessage);
         }
         return `Error: ${result.message}`;
       }
@@ -132,9 +133,9 @@ export async function provideTools(ctl: ToolsProviderController): Promise<Tool[]
   });
 
   const statusTool = tool({
-    name: "big_rag_index_status",
+    name: TOOL_INDEX_STATUS,
     description:
-      "Return Big RAG index statistics for the story selected for this chat: chunk count, unique file count, and source folders.",
+      "Return Big RAG Stories index statistics for the story selected for this chat: chunk count, unique file count, and source folders.",
     parameters: {
       story: storyParam,
     },

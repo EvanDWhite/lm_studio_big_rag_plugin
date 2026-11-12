@@ -5,7 +5,8 @@ import { preprocess } from "./promptPreprocessor";
 import { provideTools } from "./toolsProvider";
 
 /**
- * Main entry point for the Big RAG plugin.
+ * Main entry point for the Big RAG Stories plugin (evandwhite/big-rag-stories),
+ * a fork of mindstudio/big-rag installed as a separate plugin.
  * This plugin indexes large document collections and provides RAG capabilities.
  */
 export async function main(context: PluginContext) {
@@ -19,6 +20,6 @@ export async function main(context: PluginContext) {
   // Register tools for REST API / agent integrations
   context.withToolsProvider(provideTools);
   
-  console.log("[BigRAG] Plugin initialized successfully");
+  console.log("[BigRAG-Stories] Plugin initialized successfully");
 }
 

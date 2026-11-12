@@ -97,7 +97,7 @@ test("two story chats index concurrently, each only into its own store", async (
   assert.ok(brassPrompt.includes("Citation") && brassPrompt.includes("ilsanebula"), brassPrompt);
   assert.ok(!saltPrompt.includes("ilsanebula") && !brassPrompt.includes("vexmora"), "retrieval crossed stories");
   assert.ok(!saltPrompt.includes("RAWDUP") && !brassPrompt.includes("RAWDUP"), "chapter_raw leaked into a prompt");
-  assert.ok(chatSalt.statuses.some((s) => s.text.includes("Story: The Salt Kingdom (the-salt-kingdom)")));
+  assert.ok(chatSalt.statuses.some((s) => s.text.includes("Big RAG Stories · The Salt Kingdom (the-salt-kingdom)")));
 
   for (const [story, token, foreign] of [
     [salt, "vexmora", "ilsanebula"],

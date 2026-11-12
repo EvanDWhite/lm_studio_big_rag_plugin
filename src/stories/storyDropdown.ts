@@ -1,3 +1,4 @@
+import { PLUGIN_NAME } from "../identity";
 import * as fs from "fs";
 import { homedir } from "os";
 import * as path from "path";
@@ -15,7 +16,8 @@ import { listStories, resolveStoriesRoot, STORIES_ROOT_ENV } from "./storyRegist
  *    against the CURRENT global Stories Root; the hint never decides what gets searched.
  */
 
-export const STORIES_ROOT_HINT_FILENAME = "big-rag-stories-root-hint.json";
+/** Plugin-specific name (upstream Big RAG has no such file), so no cross-plugin sharing. */
+export const STORIES_ROOT_HINT_FILENAME = `${PLUGIN_NAME}-root-hint.json`;
 
 export interface DropdownState {
   /** Root the dropdown options were listed from. */
@@ -50,7 +52,7 @@ export function writeStoriesRootHint(storiesRoot: string): void {
     fs.mkdirSync(path.dirname(hintPath()), { recursive: true });
     fs.writeFileSync(hintPath(), `${JSON.stringify({ storiesRoot }, null, 2)}\n`, "utf-8");
   } catch (error) {
-    console.warn("[BigRAG] Could not write stories root hint:", error);
+    console.warn("[BigRAG-Stories] Could not write stories root hint:", error);
   }
 }
 
@@ -69,7 +71,7 @@ export async function initStoryDropdown(storiesRoot: string = resolveStartupStor
       displayName: s.displayName === s.id ? s.id : `${s.displayName} (${s.id})`,
     }));
   } catch (error) {
-    console.warn(`[BigRAG] Could not list stories under ${storiesRoot}; dropdown has only "None".`, error);
+    console.warn(`[BigRAG-Stories] Could not list stories under ${storiesRoot}; dropdown has only "None".`, error);
   }
   const schematics = buildConfigSchematics(options);
   setActiveConfigSchematics(schematics);
@@ -78,6 +80,6 @@ export async function initStoryDropdown(storiesRoot: string = resolveStartupStor
     storyIds: options.map((o) => o.value),
     builtAt: new Date().toISOString(),
   };
-  console.info(`[BigRAG] Story dropdown: ${options.length} stories from ${storiesRoot}`);
+  console.info(`[BigRAG-Stories] Story dropdown: ${options.length} stories from ${storiesRoot}`);
   return schematics;
 }

@@ -15,7 +15,7 @@ import {
 import { type IndexingProgress } from "./ingestion/indexManager";
 import { AdoptStoreError, adoptLegacyStore, formatAdoptReport, parsePathMap } from "./stories/adoptStore";
 
-const USAGE = `Big RAG CLI
+const USAGE = `Big RAG Stories CLI (evandwhite/big-rag-stories; separate from the upstream Big RAG plugin)
 
 Stories (one isolated database per title folder):
   node dist/cliIndex.js create-story <titleDir> [--id <id>] [--name <displayName>] [--model <embeddingModel>]
@@ -81,26 +81,26 @@ function createClient(): LMStudioClient {
 
 function logProgress(progress: IndexingProgress): void {
   if (progress.status === "scanning") {
-    console.log(`[BigRAG CLI] Scanning: ${progress.currentFile || "discovering files"}`);
+    console.log(`[BigRAG-Stories CLI] Scanning: ${progress.currentFile || "discovering files"}`);
   } else if (progress.status === "indexing") {
     console.log(
-      `[BigRAG CLI] Indexing: ${progress.processedFiles}/${progress.totalFiles} files ` +
+      `[BigRAG-Stories CLI] Indexing: ${progress.processedFiles}/${progress.totalFiles} files ` +
         `(success=${progress.successfulFiles ?? 0}, failed=${progress.failedFiles ?? 0}, skipped=${progress.skippedFiles ?? 0})`,
     );
   } else if (progress.status === "complete") {
-    console.log(`[BigRAG CLI] Indexing complete: ${progress.processedFiles} files processed`);
+    console.log(`[BigRAG-Stories CLI] Indexing complete: ${progress.processedFiles} files processed`);
   } else if (progress.status === "error") {
-    console.error(`[BigRAG CLI] Indexing error: ${progress.error}`);
+    console.error(`[BigRAG-Stories CLI] Indexing error: ${progress.error}`);
   }
 }
 
 async function runIndex(story: StoryHandle, force: boolean): Promise<void> {
-  console.log(`[BigRAG CLI] Target: ${story.displayName} (${story.id})`);
-  console.log(`[BigRAG CLI] Source folder(s): ${story.sourceDirs.join(", ")}`);
-  console.log(`[BigRAG CLI] Index dir: ${story.indexDir}`);
-  console.log(`[BigRAG CLI] Embedding model: ${story.embeddingModelId}`);
+  console.log(`[BigRAG-Stories CLI] Target: ${story.displayName} (${story.id})`);
+  console.log(`[BigRAG-Stories CLI] Source folder(s): ${story.sourceDirs.join(", ")}`);
+  console.log(`[BigRAG-Stories CLI] Index dir: ${story.indexDir}`);
+  console.log(`[BigRAG-Stories CLI] Embedding model: ${story.embeddingModelId}`);
   if (story.excludePatterns.length > 0) {
-    console.log(`[BigRAG CLI] Exclude patterns: ${story.excludePatterns.join(", ")}`);
+    console.log(`[BigRAG-Stories CLI] Exclude patterns: ${story.excludePatterns.join(", ")}`);
   }
   const maxConcurrent = Number(process.env.BIG_RAG_MAX_CONCURRENT ?? 1);
   const parseDelayMs = Number(process.env.BIG_RAG_PARSE_DELAY_MS ?? 500);
@@ -115,7 +115,7 @@ async function runIndex(story: StoryHandle, force: boolean): Promise<void> {
     failureReportPath: process.env.BIG_RAG_FAILURE_REPORT_PATH,
     onProgress: logProgress,
   });
-  console.log(`[BigRAG CLI] ${summary}`);
+  console.log(`[BigRAG-Stories CLI] ${summary}`);
 }
 
 function legacyFromEnv(argv: string[]): StoryHandle | null {
@@ -163,8 +163,8 @@ async function main(): Promise<void> {
       indexDir: flag(args, "index-dir"),
       acceptUnstampedChunks: flag(args, "accept-unstamped") === "true",
     });
-    console.log(`[BigRAG CLI] Created story "${story.id}" at ${story.manifestPath}`);
-    console.log(`[BigRAG CLI] Set "Story ID" to ${story.id} in a chat's Big RAG settings to use it.`);
+    console.log(`[BigRAG-Stories CLI] Created story "${story.id}" at ${story.manifestPath}`);
+    console.log(`[BigRAG-Stories CLI] Set "Story ID" to ${story.id} in a chat's Big RAG Stories settings to use it.`);
     return;
   }
 
@@ -200,11 +200,11 @@ async function main(): Promise<void> {
         if (report.errors.length > 0) process.exitCode = 2;
       } else {
         console.log(`\nAdopted ${report.chunksAdopted} chunks into story "${report.storyId}" (${report.storyDir}).`);
-        console.log(`Pick "${report.displayName}" in a chat's Big RAG "Story" dropdown (restart the plugin to refresh it) or type Story ID ${report.storyId}.`);
+        console.log(`Pick "${report.displayName}" in a chat's Big RAG Stories "Story" dropdown (restart the plugin to refresh it) or type Story ID ${report.storyId}.`);
       }
     } catch (e) {
       if (e instanceof AdoptStoreError) {
-        console.error(`[BigRAG CLI] adopt-store: ${e.message}`);
+        console.error(`[BigRAG-Stories CLI] adopt-store: ${e.message}`);
         process.exitCode = 2;
         return;
       }
@@ -215,7 +215,7 @@ async function main(): Promise<void> {
 
   if (command === "list-stories") {
     const stories = await listStories(storiesRoot);
-    console.log(`[BigRAG CLI] Stories root: ${storiesRoot}`);
+    console.log(`[BigRAG-Stories CLI] Stories root: ${storiesRoot}`);
     for (const s of stories) {
       console.log(`  ${s.id}\t${s.displayName}\t${s.sourceDirs.join(", ")}`);
     }
@@ -241,6 +241,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((error) => {
-  console.error("[BigRAG CLI] Error:", error instanceof Error ? error.message : error);
+  console.error("[BigRAG-Stories CLI] Error:", error instanceof Error ? error.message : error);
   process.exitCode = 1;
 });

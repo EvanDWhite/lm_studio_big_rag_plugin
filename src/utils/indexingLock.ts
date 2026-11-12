@@ -16,18 +16,18 @@ export function tryStartIndexing(indexDir: string, context: string = "unknown"):
   const key = lockKey(indexDir);
   const holder = locksHeld.get(key);
   if (holder !== undefined) {
-    console.debug(`[BigRAG] tryStartIndexing (${context}) failed for ${key}: held by ${holder}`);
+    console.debug(`[BigRAG-Stories] tryStartIndexing (${context}) failed for ${key}: held by ${holder}`);
     return false;
   }
   locksHeld.set(key, context);
-  console.debug(`[BigRAG] tryStartIndexing (${context}) succeeded for ${key}`);
+  console.debug(`[BigRAG-Stories] tryStartIndexing (${context}) succeeded for ${key}`);
   return true;
 }
 
 /** Release the lock for one store. */
 export function finishIndexing(indexDir: string): void {
   locksHeld.delete(lockKey(indexDir));
-  console.debug(`[BigRAG] finishIndexing: lock released for ${lockKey(indexDir)}`);
+  console.debug(`[BigRAG-Stories] finishIndexing: lock released for ${lockKey(indexDir)}`);
 }
 
 /** Whether this store is currently being indexed. */

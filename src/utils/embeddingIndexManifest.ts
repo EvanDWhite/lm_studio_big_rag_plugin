@@ -35,7 +35,7 @@ export async function readEmbeddingIndexManifest(
     if (e?.code === "ENOENT") {
       return null;
     }
-    console.warn("[BigRAG] Could not read embedding index manifest:", e);
+    console.warn("[BigRAG-Stories] Could not read embedding index manifest:", e);
     return null;
   }
 }
@@ -55,7 +55,7 @@ export async function deleteEmbeddingIndexManifest(vectorStoreDir: string): Prom
     await fs.unlink(filePath);
   } catch (e: any) {
     if (e?.code !== "ENOENT") {
-      console.warn("[BigRAG] Could not delete embedding index manifest:", e);
+      console.warn("[BigRAG-Stories] Could not delete embedding index manifest:", e);
     }
   }
 }
@@ -110,7 +110,7 @@ export async function checkEmbeddingModelForRetrieval(args: {
     if (!legacyWarnedDirs.has(key)) {
       legacyWarnedDirs.add(key);
       console.warn(
-        "[BigRAG] Index has chunks but no `.big-rag-embedding.json` manifest (likely built with an older plugin). " +
+        "[BigRAG-Stories] Index has chunks but no `.big-rag-embedding.json` manifest (likely built with an older plugin). " +
           "Retrieval proceeds; run a full reindex to record embedding metadata.",
       );
     }

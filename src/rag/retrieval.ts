@@ -42,7 +42,7 @@ async function openVectorStore(resolvedDir: string): Promise<VectorStore> {
     }
     throw error;
   }
-  console.info(`[BigRAG] Vector store ready (path=${resolvedDir}). Waiting for queries...`);
+  console.info(`[BigRAG-Stories] Vector store ready (path=${resolvedDir}). Waiting for queries...`);
   return nextStore;
 }
 
@@ -214,7 +214,7 @@ export async function retrievePassages(
 
   const queryPreview = query.length > 160 ? `${query.slice(0, 160)}...` : query;
   console.info(
-    `[BigRAG] Executing vector search for "${queryPreview}" (limit=${retrievalLimit}, threshold=${retrievalThreshold})`,
+    `[BigRAG-Stories] Executing vector search for "${queryPreview}" (limit=${retrievalLimit}, threshold=${retrievalThreshold})`,
   );
 
   const queryEmbeddingResult = await embeddingModel.embed(query);
@@ -231,10 +231,10 @@ export async function retrievePassages(
   if (results.length > 0) {
     const topHit = results[0];
     console.info(
-      `[BigRAG] Vector search returned ${results.length} results. Top hit: file=${topHit.fileName} score=${topHit.score.toFixed(3)}`,
+      `[BigRAG-Stories] Vector search returned ${results.length} results. Top hit: file=${topHit.fileName} score=${topHit.score.toFixed(3)}`,
     );
   } else {
-    console.warn("[BigRAG] Vector search returned 0 results.");
+    console.warn("[BigRAG-Stories] Vector search returned 0 results.");
   }
 
   return { ok: true, passages: mapSearchResults(results) };

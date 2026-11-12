@@ -1,6 +1,6 @@
-# Testing Guide for Big RAG Plugin
+# Testing Guide for Big RAG Stories Plugin
 
-This guide provides instructions for testing the Big RAG plugin with various scenarios and dataset sizes.
+This guide provides instructions for testing the Big RAG Stories plugin with various scenarios and dataset sizes.
 
 ## Prerequisites
 
@@ -24,7 +24,7 @@ This builds the project and executes the HTML/Markdown/Text regression tests loc
 ### 1. Install Dependencies
 
 ```bash
-cd big-rag-plugin
+cd big-rag-stories   # your clone of EvanDWhite/lm_studio_big_rag_plugin
 npm install
 ```
 
@@ -62,7 +62,7 @@ echo "# Deep Learning\n\nDeep learning uses neural networks with multiple layers
 ### 3. Create Vector Store Directory
 
 ```bash
-mkdir -p ~/.lmstudio/big-rag-test-db
+mkdir -p ~/.lmstudio/big-rag-stories-test-db
 ```
 
 ## Test Scenarios
@@ -79,7 +79,7 @@ mkdir -p ~/.lmstudio/big-rag-test-db
 
 2. Configure in LM Studio:
    - Documents Directory: `~/test-documents`
-   - Vector Store Directory: `~/.lmstudio/big-rag-test-db`
+   - Vector Store Directory: `~/.lmstudio/big-rag-stories-test-db`
    - Keep other settings at defaults
 
 3. Send a test query:
@@ -111,7 +111,7 @@ mkdir -p ~/.lmstudio/big-rag-test-db
 
 2. Clear the vector store:
    ```bash
-   rm -rf ~/.lmstudio/big-rag-test-db/*
+   rm -rf ~/.lmstudio/big-rag-stories-test-db/*
    ```
 
 3. Restart the plugin and send a query
@@ -315,7 +315,7 @@ After testing, clean up test data:
 rm -rf ~/test-documents
 
 # Remove test vector store
-rm -rf ~/.lmstudio/big-rag-test-db
+rm -rf ~/.lmstudio/big-rag-stories-test-db
 ```
 
 ## Automated Testing (Future)

@@ -1,6 +1,6 @@
 # Quick Start Guide
 
-Get up and running with the Big RAG Plugin in 5 minutes.
+Get up and running with the Big RAG Stories plugin in 5 minutes.
 
 ## Prerequisites
 
@@ -14,7 +14,7 @@ Get up and running with the Big RAG Plugin in 5 minutes.
 ### Step 1: Install Dependencies
 
 ```bash
-cd big-rag-plugin
+cd big-rag-stories   # your clone of EvanDWhite/lm_studio_big_rag_plugin
 npm install
 ```
 
@@ -38,7 +38,7 @@ This will start the plugin and register it with LM Studio.
 
 1. Open LM Studio and open a **Chat**
 2. Right sidebar → **Integrations** tab (hammer icon) — **not** Settings → Integrations
-3. Enable **Big RAG** (`mindstudio/big-rag`) in the list
+3. Enable **big-rag-stories** (`evandwhite/big-rag-stories`) in the list
 4. **Expand** the plugin row to show config fields at the bottom of the sidebar
 5. Fill in the fields (Documents Directory, Vector Store Directory, etc.)
 
@@ -50,7 +50,7 @@ For REST/curl: tools need an explicit `story` argument (there is no synced-confi
 
 **Required Settings:**
 - **Documents Directory**: Path to your documents (e.g., `/Users/yourname/Documents/MyLibrary`)
-- **Vector Store Directory**: Where to store the index (e.g., `/Users/yourname/.lmstudio/big-rag-db`)
+- **Vector Store Directory**: Where to store the index (e.g., `/Users/yourname/.lmstudio/big-rag-stories-legacy-db`)
 
 **Optional Settings (use defaults for now):**
 - **Embedding Model**: Either form can work (e.g. `mixedbread-ai/mxbai-embed-large-v1` or `text-embedding-mxbai-embed-large-v1` for the same mxbai embedder). Pick **one** string and keep it so it matches `.big-rag-embedding.json` after indexing. Default: `nomic-ai/nomic-embed-text-v1.5-GGUF`. Change only if you intend to reindex.
@@ -120,7 +120,7 @@ Citation 2 explains that "Machine learning is a subset of AI."
 1. Point Documents Directory to your actual document collection
 2. Clear the vector store if you want to start fresh:
    ```bash
-   rm -rf ~/.lmstudio/big-rag-db/*
+   rm -rf ~/.lmstudio/big-rag-stories-legacy-db/*
    ```
 3. Send a query to trigger indexing
 

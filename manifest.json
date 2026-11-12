@@ -1,9 +1,8 @@
 {
   "type": "plugin",
   "runner": "node",
-  "owner": "mindstudio",
-  "name": "big-rag",
+  "owner": "evandwhite",
+  "name": "big-rag-stories",
   "revision": 1,
-  "description": "Hosted at https://github.com/ari99/lm_studio_big_rag_plugin"
+  "description": "Big RAG Stories: one isolated RAG database per story/title folder, picked per chat. Fork of mindstudio/big-rag (separate plugin; does not replace it). https://github.com/EvanDWhite/lm_studio_big_rag_plugin"
 }
-

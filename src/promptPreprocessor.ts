@@ -72,14 +72,14 @@ function normalizePromptTemplate(template: string | null | undefined): string {
 
   if (!normalized.includes(RAG_CONTEXT_MACRO)) {
     console.warn(
-      `[BigRAG] Prompt template missing ${RAG_CONTEXT_MACRO}. Prepending RAG context block.`,
+      `[BigRAG-Stories] Prompt template missing ${RAG_CONTEXT_MACRO}. Prepending RAG context block.`,
     );
     normalized = `${RAG_CONTEXT_MACRO}\n\n${normalized}`;
   }
 
   if (!normalized.includes(USER_QUERY_MACRO)) {
     console.warn(
-      `[BigRAG] Prompt template missing ${USER_QUERY_MACRO}. Appending user query block.`,
+      `[BigRAG-Stories] Prompt template missing ${USER_QUERY_MACRO}. Appending user query block.`,
     );
     normalized = `${normalized}\n\nUser Query:\n\n${USER_QUERY_MACRO}`;
   }
@@ -109,7 +109,7 @@ async function warnIfContextOverflow(
       !("getContextLength" in tokenSource) ||
       typeof tokenSource.getContextLength !== "function"
     ) {
-      console.warn("[BigRAG] Token source does not expose prompt utilities; skipping context check.");
+      console.warn("[BigRAG-Stories] Token source does not expose prompt utilities; skipping context check.");
       return;
     }
 
@@ -127,7 +127,7 @@ async function warnIfContextOverflow(
     if (promptTokens > contextLength) {
       const warningSummary =
         `⚠️ Prompt needs ${promptTokens.toLocaleString()} tokens but model max is ${contextLength.toLocaleString()}.`;
-      console.warn("[BigRAG]", warningSummary);
+      console.warn("[BigRAG-Stories]", warningSummary);
       ctl.createStatus({
         status: "error",
         text: `${warningSummary} Reduce retrieved passages or increase the model's context length.`,
@@ -139,11 +139,11 @@ async function warnIfContextOverflow(
           noAutoDismiss: true,
         });
       } catch (notifyError) {
-        console.warn("[BigRAG] Unable to send context overflow notification:", notifyError);
+        console.warn("[BigRAG-Stories] Unable to send context overflow notification:", notifyError);
       }
     }
   } catch (error) {
-    console.warn("[BigRAG] Failed to evaluate context usage:", error);
+    console.warn("[BigRAG-Stories] Failed to evaluate context usage:", error);
   }
 }
 
@@ -162,9 +162,9 @@ const SOURCE_LABELS: Record<StorySelectionSource, string> = {
 /** One line, shown on every reply, naming the story this chat searches and how it was chosen. */
 export function storyStatusLine(story: StoryHandle, source: StorySelectionSource, storiesRoot: string): string {
   if (story.kind === "legacy") {
-    return `📚 Legacy store: ${story.indexDir} (via ${SOURCE_LABELS[source]})`;
+    return `📚 Big RAG Stories · legacy store: ${story.indexDir} (via ${SOURCE_LABELS[source]})`;
   }
-  let line = `📚 Story: ${story.displayName} (${story.id}) · via ${SOURCE_LABELS[source]}`;
+  let line = `📚 Big RAG Stories · ${story.displayName} (${story.id}) · via ${SOURCE_LABELS[source]}`;
   const dropdown = getDropdownState();
   if (dropdown && path.resolve(dropdown.storiesRoot) !== path.resolve(storiesRoot)) {
     line += ` · dropdown lists ${dropdown.storiesRoot}, Stories Root is ${storiesRoot}: reload the plugin to refresh it`;
@@ -182,7 +182,7 @@ async function reportCreateStoryRequest(
   const result = await handleCreateStoryFromChat(chat, storiesRoot);
   if (result.status === "not-requested") return;
   if (result.status === "error") {
-    console.warn(`[BigRAG] ${result.message}`);
+    console.warn(`[BigRAG-Stories] ${result.message}`);
     ctl.createStatus({ status: "error", text: result.message });
     return;
   }
@@ -191,7 +191,7 @@ async function reportCreateStoryRequest(
     `${verb} story "${result.story.displayName}" (${result.story.id}) at ${result.story.manifestPath}. ` +
     `Select it with Story ID override = ${result.story.id} (or the dropdown after a plugin reload), ` +
     `then turn "Create story from title folder" OFF.`;
-  console.info(`[BigRAG] ${text}`);
+  console.info(`[BigRAG-Stories] ${text}`);
   ctl.createStatus({ status: "done", text });
 }
 
@@ -208,7 +208,7 @@ export async function preprocess(
     readers = readConfigReaders(ctl);
   } catch (error) {
     if (error instanceof ChatConfigUnreadableError) {
-      console.warn(`[BigRAG] ${error.message}`, (error as { cause?: unknown }).cause);
+      console.warn(`[BigRAG-Stories] ${error.message}`, (error as { cause?: unknown }).cause);
       ctl.createStatus({ status: "error", text: `📚 ${error.message}` });
       return userMessage;
     }
@@ -228,10 +228,10 @@ export async function preprocess(
   if (!target.ok) {
     const text = target.message.includes("No search was run") ? target.message : `${target.message} No search was run.`;
     if (target.reason === "not-configured") {
-      console.info(`[BigRAG] ${text}`);
+      console.info(`[BigRAG-Stories] ${text}`);
       ctl.createStatus({ status: "done", text: `📚 ${text}` });
     } else {
-      console.warn(`[BigRAG] ${text}`);
+      console.warn(`[BigRAG-Stories] ${text}`);
       ctl.createStatus({ status: "error", text: `📚 ${text}` });
     }
     // Fail closed: no indexing, no retrieval, prompt passes through unchanged.
@@ -240,7 +240,7 @@ export async function preprocess(
   const story = target.story;
   ctl.createStatus({ status: "done", text: storyStatusLine(target.story, target.source, target.storiesRoot) });
   for (const warning of target.warnings) {
-    console.warn(`[BigRAG] ${warning}`);
+    console.warn(`[BigRAG-Stories] ${warning}`);
     ctl.createStatus({ status: "done", text: warning });
   }
 
@@ -253,7 +253,7 @@ export async function preprocess(
   const resolvedEmbeddingModelId = story.embeddingModelId;
 
   if (story.sourceDirs.length === 0) {
-    console.warn("[BigRAG] No source folders configured for this story.");
+    console.warn("[BigRAG-Stories] No source folders configured for this story.");
     return userMessage;
   }
 
@@ -270,13 +270,13 @@ export async function preprocess(
 
       // Log warnings
       for (const warning of sanityResult.warnings) {
-        console.warn("[BigRAG]", warning);
+        console.warn("[BigRAG-Stories]", warning);
       }
 
       // Log errors and abort if critical
       if (!sanityResult.passed) {
         for (const error of sanityResult.errors) {
-          console.error("[BigRAG]", error);
+          console.error("[BigRAG-Stories]", error);
         }
         const failureReason =
           sanityResult.errors[0] ??
@@ -332,11 +332,11 @@ export async function preprocess(
 
     // Check if we need to index
     const stats = await vectorStore.getStats();
-    console.debug(`[BigRAG] Vector store stats before auto-index check: totalChunks=${stats.totalChunks}, uniqueFiles=${stats.uniqueFiles}`);
+    console.debug(`[BigRAG-Stories] Vector store stats before auto-index check: totalChunks=${stats.totalChunks}, uniqueFiles=${stats.uniqueFiles}`);
 
     if (stats.totalChunks === 0) {
       if (!tryStartIndexing(story.indexDir, `auto-trigger:${story.id}`)) {
-        console.warn("[BigRAG] Indexing already running, skipping automatic indexing.");
+        console.warn("[BigRAG-Stories] Indexing already running, skipping automatic indexing.");
       } else {
         const indexStatus = ctl.createStatus({
           status: "loading",
@@ -356,13 +356,13 @@ export async function preprocess(
             onProgress: (progress) => reportProgress(indexStatus, progress, resolvedEmbeddingModelId),
           });
 
-          console.log(`[BigRAG] Indexing complete: ${indexingResult.successfulFiles}/${indexingResult.totalFiles} files successfully indexed (${indexingResult.failedFiles} failed)`);
+          console.log(`[BigRAG-Stories] Indexing complete: ${indexingResult.successfulFiles}/${indexingResult.totalFiles} files successfully indexed (${indexingResult.failedFiles} failed)`);
         } catch (error) {
           indexStatus.setState({
             status: "canceled",
             text: `Indexing failed: ${error instanceof Error ? error.message : String(error)}`,
           });
-          console.error("[BigRAG] Indexing failed:", error);
+          console.error("[BigRAG-Stories] Indexing failed:", error);
         } finally {
           finishIndexing(story.indexDir);
         }
@@ -376,7 +376,7 @@ export async function preprocess(
       `Manual Reindex Trigger: ${reindexRequested ? "ON" : "OFF"} | ` +
       `Skip Previously Indexed: ${skipPreviouslyIndexed ? "ON" : "OFF"} | ` +
       `Embedding model: ${resolvedEmbeddingModelId}`;
-    console.info(`[BigRAG] ${toggleStatusText}`);
+    console.info(`[BigRAG-Stories] ${toggleStatusText}`);
     ctl.createStatus({
       status: "done",
       text: toggleStatusText,
@@ -418,7 +418,7 @@ export async function preprocess(
         text: retrievalResult.message,
       });
       if (retrievalResult.logMessage) {
-        console.error("[BigRAG]", retrievalResult.logMessage);
+        console.error("[BigRAG-Stories]", retrievalResult.logMessage);
       }
       if (retrievalResult.reason === "embedding-mismatch") {
         return retrievalResult.message + `\n\nUser Query:\n\n${userPrompt}`;
@@ -440,7 +440,7 @@ export async function preprocess(
             `#${idx + 1} file=${path.basename(result.filePath)} shard=${result.shardName} score=${result.score.toFixed(3)}`,
         )
         .join("\n");
-      console.info(`[BigRAG] Relevant documents:\n${docSummaries}`);
+      console.info(`[BigRAG-Stories] Relevant documents:\n${docSummaries}`);
     }
 
     if (results.length === 0) {
@@ -484,7 +484,7 @@ export async function preprocess(
     });
     const passagesLog = passagesLogEntries.join("\n\n");
 
-    console.info(`[BigRAG] RAG passages (${results.length}) preview:\n${passagesLog}`);
+    console.info(`[BigRAG-Stories] RAG passages (${results.length}) preview:\n${passagesLog}`);
     ctl.createStatus({
       status: "done",
       text: `RAG passages (${results.length}):`,
@@ -496,7 +496,7 @@ export async function preprocess(
       });
     }
 
-    console.info(`[BigRAG] Final prompt sent to model (preview):\n${finalPromptPreview}`);
+    console.info(`[BigRAG-Stories] Final prompt sent to model (preview):\n${finalPromptPreview}`);
     ctl.createStatus({
       status: "done",
       text: `Final prompt sent to model (preview):\n${finalPromptPreview}`,
@@ -577,7 +577,7 @@ async function maybeHandleConfigTriggeredReindex({
     `Manual Reindex Trigger is ON for ${story.displayName}. Skip Previously Indexed Files is currently ${skipPreviouslyIndexed ? "ON" : "OFF"}. ` +
     "The index will be rebuilt each chat when 'Skip Previously Indexed Files' is OFF. If 'Skip Previously Indexed Files' is ON, the index will only be rebuilt for new or changed files. " +
     `Embedding model for this run: ${embeddingModelId}.`;
-  console.info(`[BigRAG] ${reminderText}`);
+  console.info(`[BigRAG-Stories] ${reminderText}`);
   ctl.createStatus({
     status: "done",
     text: reminderText,
@@ -639,7 +639,7 @@ async function maybeHandleConfigTriggeredReindex({
     }
 
     console.log(
-      `[BigRAG] Manual reindex summary:\n  ${summaryLines.join("\n  ")}`,
+      `[BigRAG-Stories] Manual reindex summary:\n  ${summaryLines.join("\n  ")}`,
     );
 
     await notifyManualResetNeeded(ctl, embeddingModelId);
@@ -648,7 +648,7 @@ async function maybeHandleConfigTriggeredReindex({
       status: "error",
       text: `Manual reindex failed: ${error instanceof Error ? error.message : String(error)}`,
     });
-    console.error("[BigRAG] Manual reindex failed:", error);
+    console.error("[BigRAG-Stories] Manual reindex failed:", error);
   } finally {
     finishIndexing(story.indexDir);
   }
@@ -665,7 +665,7 @@ async function notifyManualResetNeeded(
         `Manual Reindex Trigger is ON. The index will be rebuilt each chat when 'Skip Previously Indexed Files' is OFF. If 'Skip Previously Indexed Files' is ON, the index will only be rebuilt for new or changed files. Last run used embedding model: ${embeddingModelId}.`,
     });
   } catch (error) {
-    console.warn("[BigRAG] Unable to send notification about manual reindex reset:", error);
+    console.warn("[BigRAG-Stories] Unable to send notification about manual reindex reset:", error);
   }
 }
 

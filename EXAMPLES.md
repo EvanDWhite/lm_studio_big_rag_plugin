@@ -1,6 +1,6 @@
 # Usage Examples
 
-This document provides practical examples of using the Big RAG Plugin with different types of document collections.
+This document provides practical examples of using the Big RAG Stories plugin with different types of document collections.
 
 ## Example 1: Technical Documentation Library
 

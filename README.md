@@ -1,6 +1,20 @@
-# Big RAG Plugin for LM Studio
+# Big RAG Stories (LM Studio plugin)
 
-A powerful RAG (Retrieval-Augmented Generation) plugin for LM Studio that can index and search through gigabytes or even terabytes (not tested) of document data. Hosted here: [ari99/lm_studio_big_rag_plugin](https://github.com/ari99/lm_studio_big_rag_plugin) on GitHub.
+**Big RAG Stories** (`evandwhite/big-rag-stories`) is a fork of [Big RAG](https://github.com/ari99/lm_studio_big_rag_plugin) (`mindstudio/big-rag`). Each story/title folder gets its own isolated RAG database, and you pick the story per chat.
+
+It installs as a **separate plugin**, with a different manifest owner/name, tool names, log prefix and data folders. It never replaces or collides with an installed upstream Big RAG, and both can be installed side by side.
+
+| | Upstream Big RAG | This fork |
+|---|---|---|
+| Plugin id (`manifest.json`) | `mindstudio/big-rag` | `evandwhite/big-rag-stories` |
+| Name shown in LM Studio | big-rag | big-rag-stories |
+| Tools | `big_rag_search`, `big_rag_index_status` | `big_rag_stories_search`, `big_rag_stories_index_status` |
+| Status line / logs | `[BigRAG]` | `📚 Big RAG Stories · …` / `[BigRAG-Stories]` |
+| Story data | n/a | `~/.lmstudio/big-rag-stories/` (configurable) |
+
+Story stores keep the same on-disk vector format and `.big-rag-embedding.json` as upstream, so `adopt-store` can import an existing upstream store, and legacy mode can still read one.
+
+The text below is the upstream documentation, updated for stories.
 
 ## Features
 
@@ -86,22 +100,38 @@ npm run index
 ## Installation
 
 ```bash
-cd big-rag-plugin
-npm install
+git clone -b feature/story-dbs https://github.com/EvanDWhite/lm_studio_big_rag_plugin.git big-rag-stories
+cd big-rag-stories
+npm ci
 npm run build
+lms dev --install -y      # installs evandwhite/big-rag-stories into LM Studio (LM Studio must have been run once)
 ```
+
+Then in LM Studio, enable **big-rag-stories** in a chat's integrations/plugins menu. If upstream Big RAG is also installed, enable only one of the two per chat.
 
 Then choose one of the following:
 
 | Goal | Command | Plugin id for REST |
 |------|---------|-------------------|
 | **Dev** (hot reload, chat UI) | `npm run dev` | Use installed copy for REST (see below) |
-| **Local install** (REST + chat) | `lms dev --install -y` | `mindstudio/big-rag` |
-| **Publish to Hub** | `lms login` then `lms push -y` | `mindstudio/big-rag` |
+| **Local install** (REST + chat) | `lms dev --install -y` | `evandwhite/big-rag-stories` |
+| **Publish to Hub** | `lms login` then `lms push -y` | `evandwhite/big-rag-stories` |
 
 After code changes: `npm run build` then re-run `npm run dev`, `lms dev --install -y`, or `lms push -y`.
 
-Hub page: [lmstudio.ai/mindstudio/big-rag](https://lmstudio.ai/mindstudio/big-rag)
+Hub page: [lmstudio.ai/evandwhite/big-rag-stories](https://lmstudio.ai/evandwhite/big-rag-stories) (only exists once published with `lms push`)
+
+## Installing / "deploy" options
+
+- **Now (from GitHub, no Hub account):** clone the branch and run `lms dev --install -y` (see Installation). LM Studio copies the plugin into its local plugins folder as `evandwhite/big-rag-stories`.
+  - Update later with `git pull && npm ci && lms dev --install -y`.
+  - For hot reload while hacking, use `lms dev` instead; it shows up as `dev/evandwhite/big-rag-stories` and only lives while the command runs.
+- **One-click install (after publishing to LM Studio Hub):**
+  - Run `lms login` (browser) then `lms push` from this folder. The manifest `owner` must be your LM Studio Hub username or an org you belong to.
+  - The Hub page `https://lmstudio.ai/<owner>/big-rag-stories` then has a **Run in LM Studio** button, which opens `lmstudio://plugin?owner=<owner>&name=big-rag-stories`.
+  - A README badge can link to that Hub page. GitHub strips `lmstudio://` links from READMEs, so link the https Hub page.
+- **Automated publish (optional, needs secrets):** a GitHub Actions `workflow_dispatch` job can install headless LM Studio (`curl -fsSL https://lmstudio.ai/install.sh | bash`, `lms daemon up`), run `lms login --with-pre-authenticated-keys --key-id … --public-key … --private-key …` from repo secrets, then run `lms push -y`. Not set up yet.
+- **CI (ready, not yet enabled):** `contrib/github-workflows/ci.yml` builds and runs the tests on every push and PR, with no secrets. To enable it, move it to `.github/workflows/ci.yml`. Use GitHub's web editor ("Add file"), or push with a token that has the `workflow` scope; the bot's token can't create workflow files.
 
 ## Manual testing
 
@@ -262,7 +292,7 @@ CLI equivalents: `BIG_RAG_EXCLUDE_PATTERNS` and `BIG_RAG_ADDITIONAL_EXTENSIONS` 
    - Right sidebar → **Integrations** tab (hammer icon) — **not** Settings → Integrations
    - Enable **Big RAG** and **expand** the plugin row to show config fields
    - Set **Documents Directory** (e.g. `/Users/user/Documents/MyLibrary`)
-   - Set **Vector Store Directory** (e.g. `/Users/user/.lmstudio/big-rag-db`)
+   - Set **Vector Store Directory** (e.g. `/Users/user/.lmstudio/big-rag-stories-legacy-db`)
 
    Settings → Integrations (gear menu) only controls tool-call confirmation — **not** document paths.
 
@@ -275,12 +305,12 @@ CLI equivalents: `BIG_RAG_EXCLUDE_PATTERNS` and `BIG_RAG_ADDITIONAL_EXTENSIONS` 
 
 ## Using Big RAG via REST API
 
-Big RAG registers a **prompt preprocessor** (automatic RAG in chat) and a **tools provider** (`big_rag_search`, `big_rag_index_status`) for `/api/v1/chat`.
+Big RAG registers a **prompt preprocessor** (automatic RAG in chat) and a **tools provider** (`big_rag_stories_search`, `big_rag_stories_index_status`) for `/api/v1/chat`.
 
 ### Prerequisites
 
 1. LM Studio app open with local server enabled (`http://localhost:1234`).
-2. Plugin **installed** locally or from Hub — REST requires id `"mindstudio/big-rag"` (`owner/name` from `manifest.json`). The dev id (`dev/mindstudio/big-rag` from `npm run dev`) works in chat UI but **not** in REST.
+2. Plugin **installed** locally or from Hub — REST requires id `"evandwhite/big-rag-stories"` (`owner/name` from `manifest.json`). The dev id (`dev/evandwhite/big-rag-stories` from `npm run dev`) works in chat UI but **not** in REST.
 3. Install/update: `npm run build && lms dev --install -y` (local) or `lms push -y` (Hub).
 4. LM Studio **Server Settings**: enable **Allow calling servers from mcp.json** (required for plugin integrations).
 5. If API auth is on: create a token and pass `Authorization: Bearer $LM_API_TOKEN` ([docs](https://lmstudio.ai/docs/developer/core/authentication)).
@@ -288,7 +318,7 @@ Big RAG registers a **prompt preprocessor** (automatic RAG in chat) and a **tool
 
 ### REST configuration (tools)
 
-REST tool calls have **no chat session**, so they have no Story ID. Pass the story explicitly: tools accept an optional `story` argument (e.g. ask the model to "use big_rag_search with story the-salt-kingdom"). Without it, tools return `Error: No story selected` and search nothing.
+REST tool calls have **no chat session**, so they have no Story ID. Pass the story explicitly: tools accept an optional `story` argument (e.g. ask the model to "use big_rag_stories_search with story the-salt-kingdom"). Without it, tools return `Error: No story selected` and search nothing.
 
 There is **no fallback** to a synced `~/.lmstudio/big-rag-tools-config.json` or `BIG_RAG_DOCS_DIR` / `BIG_RAG_DB_DIR` env vars any more (that fallback could silently search another chat's store). Inside a chat, the chat's own story is always used, and a `story` argument naming a different story is refused.
 
@@ -308,11 +338,11 @@ curl -s http://127.0.0.1:1234/api/v1/chat \
   -H "Content-Type: application/json" \
   -d '{
     "model": "your-model-id",
-    "input": "Call big_rag_index_status and report totalChunks.",
+    "input": "Call big_rag_stories_index_status and report totalChunks.",
     "integrations": [{
       "type": "plugin",
-      "id": "mindstudio/big-rag",
-      "allowed_tools": ["big_rag_index_status"]
+      "id": "evandwhite/big-rag-stories",
+      "allowed_tools": ["big_rag_stories_index_status"]
     }],
     "temperature": 0
   }' | python3 -m json.tool
@@ -326,11 +356,11 @@ curl -s http://127.0.0.1:1234/api/v1/chat \
   -H "Content-Type: application/json" \
   -d '{
     "model": "your-model-id",
-    "input": "Use big_rag_search to find content about rifle cleaning. Use limit 3.",
+    "input": "Use big_rag_stories_search to find content about rifle cleaning. Use limit 3.",
     "integrations": [{
       "type": "plugin",
-      "id": "mindstudio/big-rag",
-      "allowed_tools": ["big_rag_search"]
+      "id": "evandwhite/big-rag-stories",
+      "allowed_tools": ["big_rag_stories_search"]
     }],
     "temperature": 0
   }' | python3 -m json.tool
@@ -347,7 +377,7 @@ curl -s http://127.0.0.1:1234/api/v1/chat \
     "input": "What does the documentation say about rifling?",
     "integrations": [{
       "type": "plugin",
-      "id": "mindstudio/big-rag"
+      "id": "evandwhite/big-rag-stories"
     }],
     "temperature": 0
   }' | python3 -m json.tool
@@ -357,13 +387,13 @@ curl -s http://127.0.0.1:1234/api/v1/chat \
 
 | Tool | Description |
 |------|-------------|
-| `big_rag_search` | Embed a query and return matching passages (JSON with scores and file names) |
-| `big_rag_index_status` | Return the story's chunk count, unique file count, source folders and index dir |
+| `big_rag_stories_search` | Embed a query and return matching passages (JSON with scores and file names) |
+| `big_rag_stories_index_status` | Return the story's chunk count, unique file count, source folders and index dir |
 
 ### REST limitations (observed behavior)
 
 - **One tool per request** works reliably. Prompts like “first call X, then Y” may fail with `tool_format_generation_error` because smaller models (e.g. Llama 3.1 8B) emit multiple tool calls in one generation block. Run separate curl requests instead.
-- **Large tool outputs**: `big_rag_search` with `limit=10` returns full passage text and can exceed the model context window (e.g. 14848 tokens). Ask for `limit 3` or increase context length in LM Studio.
+- **Large tool outputs**: `big_rag_stories_search` with `limit=10` returns full passage text and can exceed the model context window (e.g. 14848 tokens). Ask for `limit 3` or increase context length in LM Studio.
 - **Permission denied**: enable “Allow calling servers from mcp.json” and use a valid API token.
 - **“No story selected”**: pass `story` in the request (REST), or set Story ID in the chat.
 - Use the same **Embedding Model** for indexing and retrieval; reindex after changing models.
@@ -439,7 +469,7 @@ Larger **Chunk Size** (1024) and default retrieval settings work well for manual
    - Used by the prompt preprocessor and tools provider
 
 7. **Tools Provider** (`src/toolsProvider.ts`):
-   - Exposes `big_rag_search` and `big_rag_index_status` for REST API / agent integrations
+   - Exposes `big_rag_stories_search` and `big_rag_stories_index_status` for REST API / agent integrations
 
 ## Performance Considerations
 
@@ -463,7 +493,7 @@ Larger **Chunk Size** (1024) and default retrieval settings work well for manual
 
 - Pass the story id via the tool's `story` argument (REST has no chat Story ID).
 - Check the id with `node dist/cliIndex.js list-stories` and that **Stories Root** matches.
-- Ensure REST uses `"mindstudio/big-rag"` and the plugin is installed (`lms dev --install -y`).
+- Ensure REST uses `"evandwhite/big-rag-stories"` and the plugin is installed (`lms dev --install -y`).
 
 ### REST: `tool_format_generation_error`
 
@@ -575,7 +605,7 @@ See **Manual testing** at the top of this README. Summary:
 
 - `npm test` — unit tests (extensions, parsers, retrieval helpers)
 - `npm run dev` + LM Studio chat — E2E UI (dev plugin)
-- `npm run build && lms dev --install -y` + curl to `/api/v1/chat` — E2E REST (installed plugin id `mindstudio/big-rag`; config synced via chat message or env vars)
+- `npm run build && lms dev --install -y` + curl to `/api/v1/chat` — E2E REST (installed plugin id `evandwhite/big-rag-stories`; config synced via chat message or env vars)
 
 ### Contributing
 

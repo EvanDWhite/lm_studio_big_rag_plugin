@@ -515,7 +515,7 @@ export class IndexManager {
     const missingRoot = this.options.documentsDirs.find((dir) => !fs.existsSync(dir));
     if (missingRoot !== undefined || files.length === 0) {
       console.warn(
-        `[BigRAG] Skipping prune (${missingRoot ? `source folder missing: ${missingRoot}` : "scan found no files"}).`,
+        `[BigRAG-Stories] Skipping prune (${missingRoot ? `source folder missing: ${missingRoot}` : "scan found no files"}).`,
       );
       return 0;
     }
@@ -530,7 +530,7 @@ export class IndexManager {
       const message =
         `⚠ NOT pruning: ${missing.length} of ${fileInventory.size} indexed files are no longer in the sources ` +
         `(e.g. ${shown}). That looks like a wrong or missing folder; fix it, or remove the chunks deliberately.`;
-      console.warn(`[BigRAG] ${message}`);
+      console.warn(`[BigRAG-Stories] ${message}`);
       onProgress?.({ totalFiles: 0, processedFiles: 0, currentFile: message, status: "scanning" });
       return 0;
     }
@@ -548,7 +548,7 @@ export class IndexManager {
         }
         fileInventory.delete(absolutePath);
         pruned++;
-        console.log(`[BigRAG] Pruned chunks for file no longer in sources: ${absolutePath}`);
+        console.log(`[BigRAG-Stories] Pruned chunks for file no longer in sources: ${absolutePath}`);
       }
     }
     return pruned;
@@ -585,17 +585,17 @@ export class IndexManager {
     this.failureReasonCounts[reason] = current + 1;
     const detailSuffix = details ? ` details=${details}` : "";
     console.warn(
-      `[BigRAG] Failed to parse ${file.name} (reason=${reason}, count=${this.failureReasonCounts[reason]})${detailSuffix}`,
+      `[BigRAG-Stories] Failed to parse ${file.name} (reason=${reason}, count=${this.failureReasonCounts[reason]})${detailSuffix}`,
     );
   }
 
   private logFailureSummary() {
     const entries = Object.entries(this.failureReasonCounts);
     if (entries.length === 0) {
-      console.log("[BigRAG] No parsing failures recorded.");
+      console.log("[BigRAG-Stories] No parsing failures recorded.");
       return;
     }
-    console.log("[BigRAG] Failure reason summary:");
+    console.log("[BigRAG-Stories] Failure reason summary:");
     for (const [reason, count] of entries) {
       console.log(`  - ${reason}: ${count}`);
     }
@@ -617,9 +617,9 @@ export class IndexManager {
     try {
       await fs.promises.mkdir(path.dirname(reportPath), { recursive: true });
       await fs.promises.writeFile(reportPath, JSON.stringify(payload, null, 2), "utf-8");
-      console.log(`[BigRAG] Wrote failure report to ${reportPath}`);
+      console.log(`[BigRAG-Stories] Wrote failure report to ${reportPath}`);
     } catch (error) {
-      console.error(`[BigRAG] Failed to write failure report to ${reportPath}:`, error);
+      console.error(`[BigRAG-Stories] Failed to write failure report to ${reportPath}:`, error);
     }
   }
 }
