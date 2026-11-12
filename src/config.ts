@@ -18,11 +18,26 @@ User Query:
 
 export const configSchematics = createConfigSchematics()
   .field(
+    "storyId",
+    "string",
+    {
+      displayName: "Story ID",
+      subtitle:
+        "Story database for THIS chat (e.g. the-salt-kingdom). Stories live under the global Stories Root " +
+        "(<root>/stories/<id>/story.json); create one with `node dist/cliIndex.js create-story <titleDir>`. " +
+        "When set, the story's own source folders, excludes, embedding model and chunk settings are used and the " +
+        "legacy fields below are ignored. Leave empty AND leave the legacy paths empty to turn retrieval off.",
+      placeholder: "the-salt-kingdom",
+    },
+    "",
+  )
+  .field(
     "documentsDirectory",
     "string",
     {
-      displayName: "Documents Directory",
+      displayName: "Documents Directory (legacy)",
       subtitle:
+        "Legacy single-store mode, used only when Story ID is empty and Vector Store Directory is also set. " +
         "Root directories containing documents to index. All subdirectories will be scanned. " +
         "Multiple paths are supported: separate them with commas or put each on its own line. " +
         "Missing paths are skipped with a warning.",
@@ -37,8 +52,10 @@ export const configSchematics = createConfigSchematics()
     "vectorStoreDirectory",
     "string",
     {
-      displayName: "Vector Store Directory",
-      subtitle: "Directory where the vector database will be stored.",
+      displayName: "Vector Store Directory (legacy)",
+      subtitle:
+        "Legacy single-store mode, used only when Story ID is empty and Documents Directory is also set. " +
+        "Directory where the vector database will be stored.",
       placeholder: "/path/to/vector/store",
     },
     "",
@@ -47,9 +64,9 @@ export const configSchematics = createConfigSchematics()
     "embeddingModel",
     "string",
     {
-      displayName: "Embedding Model",
+      displayName: "Embedding Model (legacy)",
       subtitle:
-        "LM Studio accepts more than one spelling for the same model—for example mixedbread-ai/mxbai-embed-large-v1 (Hub / download) or text-embedding-mxbai-embed-large-v1 (as in lms ls). Both are valid; use one value consistently for indexing and chat so it matches .big-rag-embedding.json. Reindex after changing.",
+        "Legacy mode only (stories record their model in story.json). LM Studio accepts more than one spelling for the same model—for example mixedbread-ai/mxbai-embed-large-v1 (Hub / download) or text-embedding-mxbai-embed-large-v1 (as in lms ls). Both are valid; use one value consistently for indexing and chat so it matches .big-rag-embedding.json. Reindex after changing.",
       placeholder: DEFAULT_EMBEDDING_MODEL_ID,
     },
     DEFAULT_EMBEDDING_MODEL_ID,
@@ -86,7 +103,7 @@ export const configSchematics = createConfigSchematics()
       int: true,
       min: 128,
       max: 2048,
-      displayName: "Chunk Size",
+      displayName: "Chunk Size (legacy)",
       subtitle: "Size of text chunks for embedding (in words).",
       slider: { min: 128, max: 2048, step: 128 },
     },
@@ -99,7 +116,7 @@ export const configSchematics = createConfigSchematics()
       int: true,
       min: 0,
       max: 512,
-      displayName: "Chunk Overlap",
+      displayName: "Chunk Overlap (legacy)",
       subtitle: "Overlap between consecutive chunks (in words).",
       slider: { min: 0, max: 512, step: 32 },
     },
@@ -135,7 +152,7 @@ export const configSchematics = createConfigSchematics()
     "enableOCR",
     "boolean",
     {
-      displayName: "Enable OCR",
+      displayName: "Enable OCR (legacy)",
       subtitle: "Enable OCR for image files and image-based PDFs using LM Studio's built-in document parser.",
     },
     true,
@@ -144,7 +161,7 @@ export const configSchematics = createConfigSchematics()
     "excludeFilenamePatterns",
     "string",
     {
-      displayName: "Exclude filename patterns",
+      displayName: "Exclude filename patterns (legacy)",
       subtitle:
         "Optional. One glob per line, matched against each file path relative to Documents Directory (use /). Lines starting with # are comments. Example: *.png excludes PNGs in any folder; archive/** excludes that subtree. Does not remove chunks already in the vector store—clear or reindex to drop old data.",
       placeholder: "*.png\n# *.jpg",
@@ -156,7 +173,7 @@ export const configSchematics = createConfigSchematics()
     "additionalExtensions",
     "string",
     {
-      displayName: "Additional plain-text extensions",
+      displayName: "Additional plain-text extensions (legacy)",
       subtitle:
         "Optional. One extension per line (e.g. .java, .cs, .py). Files are read as plain text. Binaries such as .exe and .zip are rejected. Built-in types like PDF and EPUB do not need to be listed.",
       placeholder: ".java\n.cs\n.py",
@@ -203,3 +220,19 @@ export const configSchematics = createConfigSchematics()
   )
   .build();
 
+
+/** Application-wide settings (plugin management screen). */
+export const globalConfigSchematics = createConfigSchematics()
+  .field(
+    "storiesRoot",
+    "string",
+    {
+      displayName: "Stories Root",
+      subtitle:
+        "Folder that holds all story databases (<root>/stories/<storyId>/). Leave empty for the default: " +
+        "$BIG_RAG_STORIES_ROOT if set, otherwise ~/.lmstudio/big-rag-stories.",
+      placeholder: "~/.lmstudio/big-rag-stories",
+    },
+    "",
+  )
+  .build();

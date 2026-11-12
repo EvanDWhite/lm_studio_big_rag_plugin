@@ -30,6 +30,8 @@ export interface IndexingResult {
   skippedFiles: number;
   updatedFiles: number;
   newFiles: number;
+  /** Files whose chunks were removed because they are no longer under the source dirs. */
+  prunedFiles?: number;
 }
 
 type FileIndexOutcome =
@@ -56,6 +58,12 @@ export interface IndexingOptions {
   additionalPlainTextExtensions?: ReadonlySet<string>;
   abortSignal?: AbortSignal;
   onProgress?: (progress: IndexingProgress) => void;
+  /** Story id stamped into every chunk (`metadata.storyId`) and chunk id. Omit for legacy stores. */
+  storyId?: string;
+  /** Failure registry location; defaults to `<vectorStoreDir>/.big-rag-failures.json`. */
+  failureRegistryPath?: string;
+  /** Delete chunks for files that are no longer found under the source dirs (or now excluded). */
+  pruneMissingFiles?: boolean;
 }
 
 type FailureReason = ParseFailureReason | "index.chunk-empty" | "index.vector-add-error";
@@ -70,7 +78,7 @@ export class IndexManager {
     this.options = options;
     this.queue = new PQueue({ concurrency: options.maxConcurrent });
     this.failedFileRegistry = new FailedFileRegistry(
-      path.join(options.vectorStoreDir, ".big-rag-failures.json"),
+      options.failureRegistryPath ?? path.join(options.vectorStoreDir, ".big-rag-failures.json"),
     );
   }
 
@@ -164,6 +172,8 @@ export class IndexManager {
             ? ` (${excludedByPattern} excluded by exclude patterns)`
             : ""),
       );
+
+      const prunedCount = await this.pruneMissingFiles(files, fileInventory);
 
       // Step 2: Index files
       let processedCount = 0;
@@ -279,6 +289,7 @@ export class IndexManager {
         skippedFiles: skippedCount,
         updatedFiles: updatedCount,
         newFiles: newCount,
+        prunedFiles: prunedCount,
       });
 
       console.log(
@@ -293,6 +304,7 @@ export class IndexManager {
         skippedFiles: skippedCount,
         updatedFiles: updatedCount,
         newFiles: newCount,
+        prunedFiles: prunedCount,
       };
     } catch (error) {
       console.error("Error during indexing:", error);
@@ -389,8 +401,9 @@ export class IndexManager {
           const embeddingResult = await embeddingModel.embed(chunk.text);
           const embedding = coerceEmbeddingVector(embeddingResult.embedding);
           
+          const storyId = this.options.storyId;
           documentChunks.push({
-            id: `${fileHash}-${i}`,
+            id: storyId ? `${storyId}:${fileHash}-${i}` : `${fileHash}-${i}`,
             text: chunk.text,
             vector: embedding,
             filePath: file.path,
@@ -403,6 +416,7 @@ export class IndexManager {
               mtime: file.mtime.toISOString(),
               startIndex: chunk.startIndex,
               endIndex: chunk.endIndex,
+              ...(storyId ? { storyId } : {}),
             },
           });
         } catch (error) {
@@ -427,7 +441,11 @@ export class IndexManager {
         // Upsert new chunks first, then drop other hashes for this path.
         // Deleting first would wipe the prior index if addChunks failed.
         await vectorStore.addChunks(documentChunks);
-        await vectorStore.deleteOrphanChunksForFilePath(file.path, fileHash);
+        await vectorStore.deleteOrphanChunksForFilePath(
+          file.path,
+          fileHash,
+          new Set(documentChunks.map((c) => c.id)),
+        );
         console.log(`Indexed ${documentChunks.length} chunks from ${file.name}`);
         fileInventory.set(file.path, new Set([fileHash]));
         await this.failedFileRegistry.clearFailure(file.path);
@@ -459,6 +477,38 @@ export class IndexManager {
       }
       return { type: "failed" }; // Failed
     }
+  }
+
+  /**
+   * Remove chunks for files that the scan no longer returns (deleted, moved, or now excluded).
+   * Skipped when any source root is missing or the scan found nothing, so an unmounted drive
+   * cannot wipe an index.
+   */
+  private async pruneMissingFiles(
+    files: ScannedFile[],
+    fileInventory: Map<string, Set<string>>,
+  ): Promise<number> {
+    if (!this.options.pruneMissingFiles || fileInventory.size === 0) {
+      return 0;
+    }
+    const missingRoot = this.options.documentsDirs.find((dir) => !fs.existsSync(dir));
+    if (missingRoot !== undefined || files.length === 0) {
+      console.warn(
+        `[BigRAG] Skipping prune (${missingRoot ? `source folder missing: ${missingRoot}` : "scan found no files"}).`,
+      );
+      return 0;
+    }
+    const scanned = new Set(files.map((f) => path.resolve(f.path)));
+    let pruned = 0;
+    for (const storedPath of Array.from(fileInventory.keys())) {
+      if (!scanned.has(path.resolve(storedPath))) {
+        await this.options.vectorStore.deleteByFilePath(storedPath);
+        fileInventory.delete(storedPath);
+        pruned++;
+        console.log(`[BigRAG] Pruned chunks for file no longer in sources: ${storedPath}`);
+      }
+    }
+    return pruned;
   }
 
   /**

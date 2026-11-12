@@ -2,17 +2,16 @@ import {
   type ChatMessage,
   type PromptPreprocessorController,
 } from "@lmstudio/sdk";
-import { configSchematics, DEFAULT_PROMPT_TEMPLATE, resolveEmbeddingModelId } from "./config";
+import { DEFAULT_PROMPT_TEMPLATE } from "./config";
 import { performSanityChecks } from "./utils/sanityChecks";
 import { tryStartIndexing, finishIndexing } from "./utils/indexingLock";
 import { deleteEmbeddingIndexManifest } from "./utils/embeddingIndexManifest";
 import * as path from "path";
 import { runIndexingJob } from "./ingestion/runIndexing";
+import { type IndexingProgress } from "./ingestion/indexManager";
 import { type VectorStore } from "./vectorstore/vectorStore";
-import { parseExcludePatternsBlock } from "./utils/fileExcludePatterns";
-import { resolveAdditionalExtensions } from "./utils/additionalExtensions";
-import { parseDocumentPaths } from "./utils/documentPaths";
-import { syncChatToolsSettingsForRest } from "./utils/effectivePluginConfig";
+import { type StoryHandle } from "./stories/storyRegistry";
+import { readConfigReaders, resolveStoryTarget } from "./stories/resolveStoryTarget";
 import {
   ensureVectorStore,
   formatRagContext,
@@ -40,9 +39,20 @@ function isAbortError(error: unknown): boolean {
   return false;
 }
 
-let sanityChecksPassed = false;
-let lastSanityCheckedDocumentsDir = "";
-let lastSanityCheckedVectorStoreDir = "";
+/**
+ * Sanity-check memo per story: story id -> signature of the paths that last passed.
+ * Re-checked when that story's paths change; other stories are unaffected.
+ */
+const sanityCheckedSignatures = new Map<string, string>();
+
+function sanitySignature(story: StoryHandle): string {
+  return [...story.sourceDirs, "->", story.indexDir].join("\n");
+}
+
+/** @internal Test helper. */
+export function resetSanityCheckMemoForTest(): void {
+  sanityCheckedSignatures.clear();
+}
 
 const RAG_CONTEXT_MACRO = "{{rag_context}}";
 const USER_QUERY_MACRO = "{{user_query}}";
@@ -136,53 +146,52 @@ export async function preprocess(
   userMessage: ChatMessage,
 ): Promise<ChatMessage | string> {
   const userPrompt = userMessage.getText();
-  const pluginConfig = ctl.getPluginConfig(configSchematics);
-  syncChatToolsSettingsForRest(pluginConfig);
+  const { chat: chatConfig, global: globalConfig } = readConfigReaders(ctl);
 
-  // Get configuration
-  const documentsDirs = parseDocumentPaths(pluginConfig.get("documentsDirectory"));
-  const vectorStoreDir = pluginConfig.get("vectorStoreDirectory");
-  const retrievalLimit = pluginConfig.get("retrievalLimit");
-  const retrievalThreshold = pluginConfig.get("retrievalAffinityThreshold");
-  const chunkSize = pluginConfig.get("chunkSize");
-  const chunkOverlap = pluginConfig.get("chunkOverlap");
-  const maxConcurrent = pluginConfig.get("maxConcurrentFiles");
-  const enableOCR = pluginConfig.get("enableOCR");
-  const skipPreviouslyIndexed = pluginConfig.get("manualReindex.skipPreviouslyIndexed");
-  const parseDelayMs = pluginConfig.get("parseDelayMs") ?? 0;
-  const reindexRequested = pluginConfig.get("manualReindex.trigger");
-  const resolvedEmbeddingModelId = resolveEmbeddingModelId(pluginConfig.get("embeddingModel"));
-  const excludePatterns = parseExcludePatternsBlock(pluginConfig.get("excludeFilenamePatterns") ?? "");
-  const { additionalPlainTextSet: additionalPlainTextExtensions } = resolveAdditionalExtensions(
-    pluginConfig.get("additionalExtensions") ?? "",
-    (message) => console.warn(message),
-  );
-
-  // Validate configuration
-  if (documentsDirs.length === 0) {
-    console.warn("[BigRAG] Documents directory not configured. Please set it in plugin settings.");
+  // Resolve exactly one story DB for this chat. Everything below uses only `story`.
+  const target = await resolveStoryTarget({ chat: chatConfig, global: globalConfig });
+  if (!target.ok) {
+    if (target.reason === "not-configured") {
+      console.info(`[BigRAG] ${target.message}`);
+    } else {
+      console.warn(`[BigRAG] ${target.message}`);
+      ctl.createStatus({ status: "error", text: `${target.message} No search was run.` });
+    }
+    // Fail closed: no indexing, no retrieval, prompt passes through unchanged.
     return userMessage;
   }
+  const story = target.story;
+  for (const warning of target.warnings) {
+    console.warn(`[BigRAG] ${warning}`);
+    ctl.createStatus({ status: "done", text: warning });
+  }
 
-  if (!vectorStoreDir || vectorStoreDir === "") {
-    console.warn("[BigRAG] Vector store directory not configured. Please set it in plugin settings.");
+  const retrievalLimit = chatConfig.get("retrievalLimit") as number;
+  const retrievalThreshold = chatConfig.get("retrievalAffinityThreshold") as number;
+  const maxConcurrent = chatConfig.get("maxConcurrentFiles") as number;
+  const parseDelayMs = (chatConfig.get("parseDelayMs") as number | undefined) ?? 0;
+  const reindexRequested = chatConfig.get("manualReindex.trigger") === true;
+  const skipPreviouslyIndexed = chatConfig.get("manualReindex.skipPreviouslyIndexed") !== false;
+  const resolvedEmbeddingModelId = story.embeddingModelId;
+  const storyLabel = story.kind === "story" ? `Story: ${story.displayName} (${story.id})` : story.displayName;
+
+  ctl.createStatus({ status: "done", text: `📚 ${storyLabel}` });
+
+  if (story.sourceDirs.length === 0) {
+    console.warn("[BigRAG] No source folders configured for this story.");
     return userMessage;
   }
 
   try {
-    // Re-run sanity checks when paths change or on first run.
-    const resolvedDocumentsDirs = documentsDirs.map((dir) => path.resolve(dir)).join("\n");
-    const resolvedVectorStoreDir = path.resolve(vectorStoreDir);
-    const pathsChangedForSanity =
-      resolvedDocumentsDirs !== lastSanityCheckedDocumentsDir ||
-      resolvedVectorStoreDir !== lastSanityCheckedVectorStoreDir;
-    if (!sanityChecksPassed || pathsChangedForSanity) {
+    // Re-run sanity checks when this story's paths change or on its first run.
+    const signature = sanitySignature(story);
+    if (sanityCheckedSignatures.get(story.id) !== signature) {
       const checkStatus = ctl.createStatus({
         status: "loading",
         text: "Performing sanity checks...",
       });
 
-      const sanityResult = await performSanityChecks(documentsDirs, vectorStoreDir);
+      const sanityResult = await performSanityChecks(story.sourceDirs, story.indexDir);
 
       // Log warnings
       for (const warning of sanityResult.warnings) {
@@ -209,9 +218,7 @@ export async function preprocess(
         status: "done",
         text: "Sanity checks passed",
       });
-      sanityChecksPassed = true;
-      lastSanityCheckedDocumentsDir = resolvedDocumentsDirs;
-      lastSanityCheckedVectorStoreDir = resolvedVectorStoreDir;
+      sanityCheckedSignatures.set(story.id, signature);
     }
 
     checkAbort(ctl.abortSignal);
@@ -227,7 +234,7 @@ export async function preprocess(
       // Use the instance opened for THIS chat's vectorStoreDir for every step below
       // (reindex, auto-index, stats). Never re-read shared state: another chat with a
       // different vectorStoreDir may be running concurrently.
-      vectorStore = await ensureVectorStore(vectorStoreDir);
+      vectorStore = await ensureVectorStore(story.indexDir);
       status.setState({
         status: "done",
         text: "Vector store initialized",
@@ -238,18 +245,11 @@ export async function preprocess(
 
     await maybeHandleConfigTriggeredReindex({
       ctl,
-      documentsDirs,
-      vectorStoreDir,
-      embeddingModelId: resolvedEmbeddingModelId,
-      chunkSize,
-      chunkOverlap,
+      story,
       maxConcurrent,
-      enableOCR,
       parseDelayMs,
       reindexRequested,
-      excludePatterns,
-      additionalPlainTextExtensions,
-      skipPreviouslyIndexed: pluginConfig.get("manualReindex.skipPreviouslyIndexed"),
+      skipPreviouslyIndexed,
       vectorStore,
     });
 
@@ -260,7 +260,7 @@ export async function preprocess(
     console.debug(`[BigRAG] Vector store stats before auto-index check: totalChunks=${stats.totalChunks}, uniqueFiles=${stats.uniqueFiles}`);
 
     if (stats.totalChunks === 0) {
-      if (!tryStartIndexing("auto-trigger")) {
+      if (!tryStartIndexing(story.indexDir, `auto-trigger:${story.id}`)) {
         console.warn("[BigRAG] Indexing already running, skipping automatic indexing.");
       } else {
         const indexStatus = ctl.createStatus({
@@ -272,48 +272,13 @@ export async function preprocess(
           const { indexingResult } = await runIndexingJob({
             client: ctl.client,
             abortSignal: ctl.abortSignal,
-            documentsDirs,
-            vectorStoreDir,
-            embeddingModelId: resolvedEmbeddingModelId,
-            chunkSize,
-            chunkOverlap,
-            maxConcurrent,
-            enableOCR,
-            autoReindex: false,
-            parseDelayMs,
-            excludePatterns,
-            additionalPlainTextExtensions,
+            story,
             vectorStore,
+            maxConcurrent,
+            parseDelayMs,
+            autoReindex: false,
             forceReindex: true,
-            onProgress: (progress) => {
-              if (progress.status === "scanning") {
-                indexStatus.setState({
-                  status: "loading",
-                  text: `Scanning: ${progress.currentFile} (embedding model: ${resolvedEmbeddingModelId})`,
-                });
-              } else if (progress.status === "indexing") {
-                const success = progress.successfulFiles ?? 0;
-                const failed = progress.failedFiles ?? 0;
-                const skipped = progress.skippedFiles ?? 0;
-                indexStatus.setState({
-                  status: "loading",
-                  text: `Indexing: ${progress.processedFiles}/${progress.totalFiles} files ` +
-                    `(success=${success}, failed=${failed}, skipped=${skipped}) ` +
-                    `(embedding model: ${resolvedEmbeddingModelId}) ` +
-                    `(${progress.currentFile})`,
-                });
-              } else if (progress.status === "complete") {
-                indexStatus.setState({
-                  status: "done",
-                  text: `Indexing complete: ${progress.processedFiles} files processed (embedding model: ${resolvedEmbeddingModelId})`,
-                });
-              } else if (progress.status === "error") {
-                indexStatus.setState({
-                  status: "canceled",
-                  text: `Indexing error: ${progress.error}`,
-                });
-              }
-            },
+            onProgress: (progress) => reportProgress(indexStatus, progress, resolvedEmbeddingModelId),
           });
 
           console.log(`[BigRAG] Indexing complete: ${indexingResult.successfulFiles}/${indexingResult.totalFiles} files successfully indexed (${indexingResult.failedFiles} failed)`);
@@ -324,7 +289,7 @@ export async function preprocess(
           });
           console.error("[BigRAG] Indexing failed:", error);
         } finally {
-          finishIndexing();
+          finishIndexing(story.indexDir);
         }
       }
     }
@@ -344,7 +309,7 @@ export async function preprocess(
 
     const retrievalStats = await vectorStore.getStats();
     if (retrievalStats.totalChunks === 0) {
-      await deleteEmbeddingIndexManifest(vectorStoreDir);
+      await deleteEmbeddingIndexManifest(story.indexDir);
       ctl.createStatus({
         status: "canceled",
         text: "No documents indexed yet",
@@ -363,8 +328,7 @@ export async function preprocess(
 
     const retrievalResult = await retrievePassages({
       client: ctl.client,
-      vectorStoreDir,
-      embeddingModelId: resolvedEmbeddingModelId,
+      story,
       query: userPrompt,
       retrievalLimit,
       retrievalThreshold,
@@ -427,7 +391,7 @@ export async function preprocess(
 
     const { full: ragContextFull, preview: ragContextPreview } = formatRagContext(results);
 
-    const promptTemplate = normalizePromptTemplate(pluginConfig.get("promptTemplate"));
+    const promptTemplate = normalizePromptTemplate(chatConfig.get("promptTemplate") as string | undefined);
     const finalPrompt = fillPromptTemplate(promptTemplate, {
       [RAG_CONTEXT_MACRO]: ragContextFull,
       [USER_QUERY_MACRO]: userPrompt,
@@ -479,44 +443,63 @@ export async function preprocess(
 
 interface ConfigReindexOpts {
   ctl: PromptPreprocessorController;
-  documentsDirs: string[];
-  vectorStoreDir: string;
-  embeddingModelId: string;
-  chunkSize: number;
-  chunkOverlap: number;
+  story: StoryHandle;
   maxConcurrent: number;
-  enableOCR: boolean;
   parseDelayMs: number;
   reindexRequested: boolean;
-  excludePatterns: string[];
-  additionalPlainTextExtensions: ReadonlySet<string>;
   skipPreviouslyIndexed: boolean;
-  /** Store opened for this chat's vectorStoreDir; indexing must write only here. */
+  /** Store opened for this story's indexDir; indexing must write only here. */
   vectorStore: VectorStore;
+}
+
+type StatusHandle = ReturnType<PromptPreprocessorController["createStatus"]>;
+
+function reportProgress(status: StatusHandle, progress: IndexingProgress, embeddingModelId: string): void {
+  if (progress.status === "scanning") {
+    status.setState({
+      status: "loading",
+      text: `Scanning: ${progress.currentFile} (embedding model: ${embeddingModelId})`,
+    });
+  } else if (progress.status === "indexing") {
+    const success = progress.successfulFiles ?? 0;
+    const failed = progress.failedFiles ?? 0;
+    const skipped = progress.skippedFiles ?? 0;
+    status.setState({
+      status: "loading",
+      text: `Indexing: ${progress.processedFiles}/${progress.totalFiles} files ` +
+        `(success=${success}, failed=${failed}, skipped=${skipped}) ` +
+        `(embedding model: ${embeddingModelId}) ` +
+        `(${progress.currentFile})`,
+    });
+  } else if (progress.status === "complete") {
+    status.setState({
+      status: "done",
+      text: `Indexing complete: ${progress.processedFiles} files processed (embedding model: ${embeddingModelId})`,
+    });
+  } else if (progress.status === "error") {
+    status.setState({
+      status: "canceled",
+      text: `Indexing error: ${progress.error}`,
+    });
+  }
 }
 
 async function maybeHandleConfigTriggeredReindex({
   ctl,
-  documentsDirs,
-  vectorStoreDir,
-  embeddingModelId,
-  chunkSize,
-  chunkOverlap,
+  story,
   maxConcurrent,
-  enableOCR,
   parseDelayMs,
   reindexRequested,
-  excludePatterns,
-  additionalPlainTextExtensions,
   skipPreviouslyIndexed,
   vectorStore,
 }: ConfigReindexOpts) {
   if (!reindexRequested) {
     return;
   }
+  const embeddingModelId = story.embeddingModelId;
 
   const reminderText =
-    `Manual Reindex Trigger is ON. Skip Previously Indexed Files is currently ${skipPreviouslyIndexed ? "ON" : "OFF"}. ` +
+    `Manual Reindex Trigger is ON for ${story.displayName}. Skip Previously Indexed Files is currently ${skipPreviouslyIndexed ? "ON" : "OFF"}. ` +
     "The index will be rebuilt each chat when 'Skip Previously Indexed Files' is OFF. If 'Skip Previously Indexed Files' is ON, the index will only be rebuilt for new or changed files. " +
     `Embedding model for this run: ${embeddingModelId}.`;
   console.info(`[BigRAG] ${reminderText}`);
@@ -525,10 +508,10 @@ async function maybeHandleConfigTriggeredReindex({
     text: reminderText,
   });
 
-  if (!tryStartIndexing("config-trigger")) {
+  if (!tryStartIndexing(story.indexDir, `config-trigger:${story.id}`)) {
     ctl.createStatus({
       status: "canceled",
-      text: "Manual reindex already running. Please wait for it to finish.",
+      text: `Reindex of ${story.displayName} already running. Please wait for it to finish.`,
     });
     return;
   }
@@ -542,48 +525,13 @@ async function maybeHandleConfigTriggeredReindex({
     const { indexingResult } = await runIndexingJob({
       client: ctl.client,
       abortSignal: ctl.abortSignal,
-      documentsDirs,
-      vectorStoreDir,
-      embeddingModelId,
-      chunkSize,
-      chunkOverlap,
-      maxConcurrent,
-      enableOCR,
-      autoReindex: skipPreviouslyIndexed,
-      parseDelayMs,
-      excludePatterns,
-      additionalPlainTextExtensions,
-      forceReindex: !skipPreviouslyIndexed,
+      story,
       vectorStore,
-      onProgress: (progress) => {
-        if (progress.status === "scanning") {
-          status.setState({
-            status: "loading",
-            text: `Scanning: ${progress.currentFile} (embedding model: ${embeddingModelId})`,
-          });
-        } else if (progress.status === "indexing") {
-          const success = progress.successfulFiles ?? 0;
-          const failed = progress.failedFiles ?? 0;
-          const skipped = progress.skippedFiles ?? 0;
-          status.setState({
-            status: "loading",
-            text: `Indexing: ${progress.processedFiles}/${progress.totalFiles} files ` +
-              `(success=${success}, failed=${failed}, skipped=${skipped}) ` +
-              `(embedding model: ${embeddingModelId}) ` +
-              `(${progress.currentFile})`,
-          });
-        } else if (progress.status === "complete") {
-          status.setState({
-            status: "done",
-            text: `Indexing complete: ${progress.processedFiles} files processed (embedding model: ${embeddingModelId})`,
-          });
-        } else if (progress.status === "error") {
-          status.setState({
-            status: "canceled",
-            text: `Indexing error: ${progress.error}`,
-          });
-        }
-      },
+      maxConcurrent,
+      parseDelayMs,
+      autoReindex: skipPreviouslyIndexed,
+      forceReindex: !skipPreviouslyIndexed,
+      onProgress: (progress) => reportProgress(status, progress, embeddingModelId),
     });
 
     status.setState({
@@ -592,12 +540,14 @@ async function maybeHandleConfigTriggeredReindex({
     });
 
     const summaryLines = [
+      `Story: ${story.displayName}`,
       `Embedding model: ${embeddingModelId}`,
       `Processed: ${indexingResult.successfulFiles}/${indexingResult.totalFiles}`,
       `Failed: ${indexingResult.failedFiles}`,
       `Skipped (unchanged): ${indexingResult.skippedFiles}`,
       `Updated existing files: ${indexingResult.updatedFiles}`,
       `New files added: ${indexingResult.newFiles}`,
+      `Pruned (no longer in sources): ${indexingResult.prunedFiles ?? 0}`,
     ];
     for (const line of summaryLines) {
       ctl.createStatus({
@@ -625,7 +575,7 @@ async function maybeHandleConfigTriggeredReindex({
     });
     console.error("[BigRAG] Manual reindex failed:", error);
   } finally {
-    finishIndexing();
+    finishIndexing(story.indexDir);
   }
 }
 

@@ -1,5 +1,5 @@
 import { type PluginContext } from "@lmstudio/sdk";
-import { configSchematics } from "./config";
+import { configSchematics, globalConfigSchematics } from "./config";
 import { preprocess } from "./promptPreprocessor";
 import { provideTools } from "./toolsProvider";
 
@@ -9,6 +9,7 @@ import { provideTools } from "./toolsProvider";
  */
 export async function main(context: PluginContext) {
   context.withConfigSchematics(configSchematics);
+  context.withGlobalConfigSchematics(globalConfigSchematics);
   
   // Register the prompt preprocessor
   context.withPromptPreprocessor(preprocess);

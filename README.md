@@ -128,9 +128,31 @@ cd big-rag-plugin && npm run index
 
 Paths are set in `package.json` `index` script or via `BIG_RAG_DOCS_DIR` / `BIG_RAG_DB_DIR` env vars.
 
+## Story databases (multiple isolated indexes)
+
+Each **story** is its own isolated database: one title folder → one index. A chat picks its story with the **Story ID** field; two chats on different stories never see each other's chunks.
+
+- **Stories Root** (global plugin setting): where story databases live. Empty = `$BIG_RAG_STORIES_ROOT`, else `~/.lmstudio/big-rag-stories`.
+- Layout: `<root>/stories/<storyId>/story.json` (manifest), `index/` (Vectra shards), `.big-rag-failures.json`.
+- Create a story from a title folder (defaults: index **every subfolder** except `**/chapter_raw/**`):
+
+  ```bash
+  npm run build
+  node dist/cliIndex.js create-story "/path/to/The Salt Kingdom"      # id: the-salt-kingdom
+  node dist/cliIndex.js list-stories
+  node dist/cliIndex.js index --story the-salt-kingdom                # optional; chat auto-indexes an empty story
+  ```
+
+  Options: `--id`, `--name`, `--model <embedding model>`, `--exclude <glob>` (repeatable; replaces the default), `--chunk-size`, `--chunk-overlap`, `--stories-root`.
+- `story.json` holds the story's source folders (`titleDir` + `sourceDirs`, default `["."]`), `excludePatterns`, `additionalExtensions`, embedding model + dimensions, chunk settings, OCR flag and stats. Edit it to change per-story settings; reindex after changing model or chunking.
+- Every chunk is stamped with `metadata.storyId`; search drops anything not stamped for the chat's story. Reindexing a story also prunes chunks for files that were deleted, moved out, or are now excluded (skipped if a source folder is missing).
+- **Fail closed:** if Story ID is empty and the legacy paths are not both set, or the Story ID does not exist, Big RAG does nothing (no indexing, no search) and the message goes to the model unchanged.
+
+**Legacy single-store mode** still works: leave Story ID empty and set both **Documents Directory (legacy)** and **Vector Store Directory (legacy)**. Fields marked *(legacy)* apply only in that mode; stories take them from `story.json`.
+
 ## Configuration
 
-All plugin fields appear in the **chat Integrations sidebar** when Big RAG is enabled (expand the plugin row). There is no separate global settings screen for document paths.
+All per-chat plugin fields appear in the **chat Integrations sidebar** when Big RAG is enabled (expand the plugin row). The only global setting is **Stories Root** (plugin settings).
 
 The plugin provides the following configuration options:
 
@@ -204,13 +226,9 @@ Big RAG registers a **prompt preprocessor** (automatic RAG in chat) and a **tool
 
 ### REST configuration (tools)
 
-REST tool calls have **no chat session**, so they do not read the sidebar directly. Paths come from (in order):
+REST tool calls have **no chat session**, so they have no Story ID. Pass the story explicitly: tools accept an optional `story` argument (e.g. ask the model to "use big_rag_search with story the-salt-kingdom"). Without it, tools return `Error: No story selected` and search nothing.
 
-1. Chat sidebar values, merged and synced to `~/.lmstudio/big-rag-tools-config.json` when the **prompt preprocessor runs** — both **Documents Directory** and **Vector Store Directory** must be set in chat for that sync to write. Send at least one chat message with Big RAG enabled after configuring paths.
-2. That synced JSON file (persists until deleted). A custom embedding model already in the sync file is **not** overwritten by the chat schematic default.
-3. Environment variables on the **LM Studio process**: `BIG_RAG_DOCS_DIR`, `BIG_RAG_DB_DIR`, optional `BIG_RAG_EMBEDDING_MODEL`, `BIG_RAG_RETRIEVAL_LIMIT`, `BIG_RAG_RETRIEVAL_AFFINITY_THRESHOLD`.
-
-If you delete the JSON file, send a chat message again (with both paths set) or set the env vars before calling tools via curl.
+There is **no fallback** to a synced `~/.lmstudio/big-rag-tools-config.json` or `BIG_RAG_DOCS_DIR` / `BIG_RAG_DB_DIR` env vars any more (that fallback could silently search another chat's store). Inside a chat, the chat's own story is always used, and a `story` argument naming a different story is refused.
 
 ### Native REST API (`/api/v1/chat`)
 
@@ -256,7 +274,7 @@ curl -s http://127.0.0.1:1234/api/v1/chat \
   }' | python3 -m json.tool
 ```
 
-**Preprocessor-only RAG** (no explicit tools — model answers using injected context; needs sidebar config + chat sync or env vars):
+**Preprocessor-only RAG** (no explicit tools — needs a chat config with a Story ID or legacy paths; a bare REST request has none, so nothing is injected):
 
 ```bash
 curl -s http://127.0.0.1:1234/api/v1/chat \
@@ -278,14 +296,14 @@ curl -s http://127.0.0.1:1234/api/v1/chat \
 | Tool | Description |
 |------|-------------|
 | `big_rag_search` | Embed a query and return matching passages (JSON with scores and file names) |
-| `big_rag_index_status` | Return chunk count, unique file count, and configured directory paths (needs vector store path; documents path is optional metadata) |
+| `big_rag_index_status` | Return the story's chunk count, unique file count, source folders and index dir |
 
 ### REST limitations (observed behavior)
 
 - **One tool per request** works reliably. Prompts like “first call X, then Y” may fail with `tool_format_generation_error` because smaller models (e.g. Llama 3.1 8B) emit multiple tool calls in one generation block. Run separate curl requests instead.
 - **Large tool outputs**: `big_rag_search` with `limit=10` returns full passage text and can exceed the model context window (e.g. 14848 tokens). Ask for `limit 3` or increase context length in LM Studio.
 - **Permission denied**: enable “Allow calling servers from mcp.json” and use a valid API token.
-- **“Vector store directory is not configured”** (or missing docs path for indexing): sync config via a chat message (both paths set), restore `~/.lmstudio/big-rag-tools-config.json`, or set `BIG_RAG_DOCS_DIR` / `BIG_RAG_DB_DIR`.
+- **“No story selected”**: pass `story` in the request (REST), or set Story ID in the chat.
 - Use the same **Embedding Model** for indexing and retrieval; reindex after changing models.
 
 ### OpenAI-compatible `/v1/chat/completions`
@@ -379,12 +397,11 @@ Larger **Chunk Size** (1024) and default retrieval settings work well for manual
 
 ## Troubleshooting
 
-### REST: “Documents / Vector store directory is not configured”
+### REST: “No story selected”
 
-- Configure **both** paths in the **chat Integrations sidebar**, then send **one chat message** to sync to `~/.lmstudio/big-rag-tools-config.json`.
-- Or set `BIG_RAG_DOCS_DIR` and `BIG_RAG_DB_DIR` on the LM Studio process.
+- Pass the story id via the tool's `story` argument (REST has no chat Story ID).
+- Check the id with `node dist/cliIndex.js list-stories` and that **Stories Root** matches.
 - Ensure REST uses `"mindstudio/big-rag"` and the plugin is installed (`lms dev --install -y`).
-- `big_rag_index_status` only requires the **vector store** path; `big_rag_search` needs a usable index (indexing still needs the documents path).
 
 ### REST: `tool_format_generation_error`
 

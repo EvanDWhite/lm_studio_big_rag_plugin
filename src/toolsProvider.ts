@@ -1,15 +1,41 @@
 import { tool, type Tool, type ToolsProviderController } from "@lmstudio/sdk";
 import { z } from "zod";
-import { resolveEmbeddingModelId } from "./config";
 import { getIndexStatus, retrievePassages } from "./rag/retrieval";
-import { parseDocumentPaths } from "./utils/documentPaths";
-import { readToolsPluginSettings } from "./utils/effectivePluginConfig";
+import { readConfigReaders, resolveStoryTarget, type StoryTarget } from "./stories/resolveStoryTarget";
+
+/**
+ * Tools resolve their story exactly like the prompt preprocessor: from THIS chat's config (Story
+ * ID, or both legacy path fields). A REST caller with no chat config must pass `story`
+ * explicitly. There is no fallback to a synced "last used chat" file or env vars, and a tool
+ * call can never switch a chat to a different story than the one it is bound to.
+ */
+async function resolveForTool(ctl: ToolsProviderController, story?: string): Promise<StoryTarget> {
+  const { chat, global } = readConfigReaders(ctl);
+  return resolveStoryTarget({ chat, global, explicitStoryId: story });
+}
+
+function targetError(target: Exclude<StoryTarget, { ok: true }>): string {
+  if (target.reason === "not-configured") {
+    return (
+      "Error: No story selected. Set Story ID in this chat's Big RAG settings, or pass the `story` " +
+      "argument (REST). No search was run."
+    );
+  }
+  return `Error: ${target.message} No search was run.`;
+}
+
+const storyParam = z
+  .string()
+  .optional()
+  .describe(
+    "Story database id (REST only). In a chat, the chat's selected story is always used and a different id is refused.",
+  );
 
 export async function provideTools(ctl: ToolsProviderController): Promise<Tool[]> {
   const searchTool = tool({
     name: "big_rag_search",
     description:
-      "Search the Big RAG indexed document collection for passages relevant to a query. " +
+      "Search the Big RAG story database selected for this chat for passages relevant to a query. " +
       "Returns matching text snippets with file names and similarity scores.",
     parameters: {
       query: z.string().describe("Natural-language search query"),
@@ -20,33 +46,30 @@ export async function provideTools(ctl: ToolsProviderController): Promise<Tool[]
         .max(20)
         .optional()
         .describe("Maximum passages to return (defaults to plugin Retrieval Limit setting)"),
+      story: storyParam,
     },
-    implementation: async ({ query, limit }, { signal, status }) => {
+    implementation: async ({ query, limit, story }, { signal, status }) => {
       status("Searching indexed documents…");
 
-      const pluginSettings = readToolsPluginSettings(ctl);
       const trimmedQuery = query.trim();
       if (trimmedQuery.length === 0) {
         return "Error: Search query must not be empty.";
       }
 
-      const vectorStoreDir = pluginSettings.vectorStoreDirectory;
-      if (!vectorStoreDir.trim()) {
-        return (
-          "Error: Vector store directory is not configured. " +
-          "Set paths in the chat Integrations sidebar. REST reuses them via auto-sync to ~/.lmstudio/big-rag-tools-config.json, " +
-          "or set BIG_RAG_DOCS_DIR / BIG_RAG_DB_DIR env vars on the LM Studio process."
-        );
+      const target = await resolveForTool(ctl, story);
+      if (!target.ok) {
+        return targetError(target);
       }
 
-      const retrievalLimit = limit ?? pluginSettings.retrievalLimit;
-      const retrievalThreshold = pluginSettings.retrievalAffinityThreshold;
-      const embeddingModelId = resolveEmbeddingModelId(pluginSettings.embeddingModel);
+      const { chat } = readConfigReaders(ctl);
+      const configuredLimit = chat.get("retrievalLimit");
+      const configuredThreshold = chat.get("retrievalAffinityThreshold");
+      const retrievalLimit = limit ?? (typeof configuredLimit === "number" ? configuredLimit : 5);
+      const retrievalThreshold = typeof configuredThreshold === "number" ? configuredThreshold : 0.5;
 
       const result = await retrievePassages({
         client: ctl.client,
-        vectorStoreDir,
-        embeddingModelId,
+        story: target.story,
         query: trimmedQuery,
         retrievalLimit,
         retrievalThreshold,
@@ -61,7 +84,6 @@ export async function provideTools(ctl: ToolsProviderController): Promise<Tool[]
       }
 
       // Return a plain object — LM Studio serializes tool results once.
-      // Pre-stringifying caused double-encoded JSON in REST/tool payloads.
       type SearchPassageResult = {
         rank: number;
         fileName: string;
@@ -70,16 +92,6 @@ export async function provideTools(ctl: ToolsProviderController): Promise<Tool[]
         shardName: string;
         text: string;
       };
-
-      if (result.passages.length === 0) {
-        const emptyPassages: SearchPassageResult[] = [];
-        return {
-          query: trimmedQuery,
-          passageCount: 0,
-          passages: emptyPassages,
-          message: "No relevant content found in indexed documents for this query.",
-        };
-      }
 
       const searchPassages: SearchPassageResult[] = result.passages.map(
         (passage, passageIndex) => ({
@@ -93,9 +105,13 @@ export async function provideTools(ctl: ToolsProviderController): Promise<Tool[]
       );
 
       return {
+        story: target.story.id,
         query: trimmedQuery,
         passageCount: searchPassages.length,
         passages: searchPassages,
+        ...(searchPassages.length === 0
+          ? { message: "No relevant content found in this story's indexed documents for this query." }
+          : {}),
       };
     },
   });
@@ -103,30 +119,18 @@ export async function provideTools(ctl: ToolsProviderController): Promise<Tool[]
   const statusTool = tool({
     name: "big_rag_index_status",
     description:
-      "Return Big RAG index statistics: chunk count, unique file count, and configured directories.",
-    parameters: {},
-    implementation: async (_params, { status }) => {
+      "Return Big RAG index statistics for the story selected for this chat: chunk count, unique file count, and source folders.",
+    parameters: {
+      story: storyParam,
+    },
+    implementation: async ({ story }, { status }) => {
       status("Reading index status…");
 
-      const pluginSettings = readToolsPluginSettings(ctl);
-      const documentsDirs = parseDocumentPaths(pluginSettings.documentsDirectory);
-      const vectorStoreDir = pluginSettings.vectorStoreDirectory;
-      const embeddingModelId = resolveEmbeddingModelId(pluginSettings.embeddingModel);
-
-      const indexStatus = await getIndexStatus({
-        documentsDirs,
-        vectorStoreDirectory: vectorStoreDir,
-        embeddingModelId,
-      });
-
-      if ("error" in indexStatus) {
-        return (
-          `Error: ${indexStatus.error} Set paths in chat Integrations sidebar (syncs for REST on first message), ` +
-          "or BIG_RAG_DOCS_DIR / BIG_RAG_DB_DIR env vars."
-        );
+      const target = await resolveForTool(ctl, story);
+      if (!target.ok) {
+        return targetError(target);
       }
-
-      return indexStatus;
+      return getIndexStatus({ story: target.story });
     },
   });
 

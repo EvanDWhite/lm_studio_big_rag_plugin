@@ -2,6 +2,7 @@ import * as path from "path";
 import { type LMStudioClient } from "@lmstudio/sdk";
 import { resolveEmbeddingModelId } from "../config";
 import { VectorStore, type SearchResult } from "../vectorstore/vectorStore";
+import { chunkBelongsToStory, type StoryHandle } from "../stories/storyRegistry";
 import {
   checkEmbeddingModelForRetrieval,
   deleteEmbeddingIndexManifest,
@@ -148,8 +149,8 @@ function mapSearchResults(results: SearchResult[]): RetrievedPassage[] {
 
 export interface RetrievePassagesParams {
   client: LMStudioClient;
-  vectorStoreDir: string;
-  embeddingModelId: string;
+  /** The one story DB to search. Embedding model and index location come from it. */
+  story: StoryHandle;
   query: string;
   retrievalLimit: number;
   retrievalThreshold: number;
@@ -168,18 +169,10 @@ export type RetrievePassagesResult =
 export async function retrievePassages(
   params: RetrievePassagesParams,
 ): Promise<RetrievePassagesResult> {
-  const {
-    client,
-    vectorStoreDir,
-    embeddingModelId,
-    query,
-    retrievalLimit,
-    retrievalThreshold,
-    abortSignal,
-  } = params;
+  const { client, story, query, retrievalLimit, retrievalThreshold, abortSignal } = params;
 
-  const resolvedModelId = resolveEmbeddingModelId(embeddingModelId);
-  const resolvedStoreDir = path.resolve(vectorStoreDir);
+  const resolvedModelId = resolveEmbeddingModelId(story.embeddingModelId);
+  const resolvedStoreDir = path.resolve(story.indexDir);
   throwIfAborted(abortSignal);
 
   const store = await ensureVectorStore(resolvedStoreDir);
@@ -224,10 +217,12 @@ export async function retrievePassages(
   const queryEmbeddingResult = await embeddingModel.embed(query);
   throwIfAborted(abortSignal);
 
+  // Ownership filter: only chunks stamped for this story (or unstamped, for legacy stores).
   const results = await store.search(
     queryEmbeddingResult.embedding,
     retrievalLimit,
     retrievalThreshold,
+    (metadata) => chunkBelongsToStory(metadata, story),
   );
 
   if (results.length > 0) {
@@ -243,35 +238,34 @@ export async function retrievePassages(
 }
 
 export interface IndexStatusParams {
-  documentsDirs: string[];
-  vectorStoreDirectory: string;
-  embeddingModelId: string;
+  story: StoryHandle;
 }
 
 export interface IndexStatusResult {
-  documentsDirs: string[];
-  vectorStoreDirectory: string;
+  storyId: string;
+  storyName: string;
+  kind: StoryHandle["kind"];
+  sourceDirs: string[];
+  excludePatterns: string[];
+  indexDir: string;
   embeddingModelId: string;
   totalChunks: number;
   uniqueFiles: number;
 }
 
-export async function getIndexStatus(
-  params: IndexStatusParams,
-): Promise<IndexStatusResult | { error: string }> {
-  const { documentsDirs, vectorStoreDirectory, embeddingModelId } = params;
-
-  if (!vectorStoreDirectory.trim()) {
-    return { error: "Vector store directory is not configured." };
-  }
-
-  const store = await ensureVectorStore(vectorStoreDirectory);
+export async function getIndexStatus(params: IndexStatusParams): Promise<IndexStatusResult> {
+  const { story } = params;
+  const store = await ensureVectorStore(story.indexDir);
   const stats = await store.getStats();
 
   return {
-    documentsDirs,
-    vectorStoreDirectory,
-    embeddingModelId: resolveEmbeddingModelId(embeddingModelId),
+    storyId: story.id,
+    storyName: story.displayName,
+    kind: story.kind,
+    sourceDirs: story.sourceDirs,
+    excludePatterns: story.excludePatterns,
+    indexDir: story.indexDir,
+    embeddingModelId: resolveEmbeddingModelId(story.embeddingModelId),
     totalChunks: stats.totalChunks,
     uniqueFiles: stats.uniqueFiles,
   };

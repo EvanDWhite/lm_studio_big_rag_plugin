@@ -155,6 +155,8 @@ export class VectorStore {
     queryVector: number[],
     limit: number = 5,
     threshold: number = 0.5,
+    /** Optional ownership filter applied before ranking (e.g. story isolation). */
+    accept?: (metadata: Record<string, any>) => boolean,
   ): Promise<SearchResult[]> {
     const merged: SearchResult[] = [];
     for (const dir of this.shardDirs) {
@@ -168,6 +170,9 @@ export class VectorStore {
       );
       for (const r of results) {
         const m = r.item.metadata as ChunkMetadata;
+        if (accept && !accept((r.item.metadata as Record<string, any>) ?? {})) {
+          continue;
+        }
         merged.push({
           text: m?.text ?? "",
           score: r.score,
@@ -212,10 +217,15 @@ export class VectorStore {
   async deleteOrphanChunksForFilePath(
     filePath: string,
     keepFileHash: string,
+    /** When given, keep ONLY these chunk ids for the path (drops stale same-hash chunks too). */
+    keepIds?: ReadonlySet<string>,
   ): Promise<void> {
-    return this.deleteChunksMatching((metadata: ChunkMetadata): boolean => {
+    return this.deleteChunksMatching((metadata: ChunkMetadata, id: string): boolean => {
       if (!this.metadataMatchesFilePath(metadata, filePath)) {
         return false;
+      }
+      if (keepIds) {
+        return !keepIds.has(id);
       }
       return metadata.fileHash !== keepFileHash;
     }, `orphan chunks for file path: ${filePath} (kept hash ${keepFileHash})`);
@@ -238,7 +248,7 @@ export class VectorStore {
   }
 
   private async deleteChunksMatching(
-    predicate: (metadata: ChunkMetadata) => boolean,
+    predicate: (metadata: ChunkMetadata, id: string) => boolean,
     logLabel: string,
   ): Promise<void> {
     const lastDir = this.shardDirs[this.shardDirs.length - 1];
@@ -248,7 +258,7 @@ export class VectorStore {
         const items = await shard.listItems();
         const toDelete = items.filter((item) => {
           const metadata = item.metadata as ChunkMetadata | undefined;
-          return metadata !== undefined && predicate(metadata);
+          return metadata !== undefined && predicate(metadata, item.id);
         });
         if (toDelete.length > 0) {
           await shard.beginUpdate();
@@ -288,6 +298,20 @@ export class VectorStore {
       }
     }
     return inventory;
+  }
+
+  /**
+   * Every stored chunk's id + metadata (all shards). Intended for audits and tests.
+   */
+  async listChunks(): Promise<Array<{ id: string; metadata: Record<string, any> }>> {
+    const out: Array<{ id: string; metadata: Record<string, any> }> = [];
+    for (const dir of this.shardDirs) {
+      const shard = this.openShard(dir);
+      for (const item of await shard.listItems()) {
+        out.push({ id: item.id, metadata: (item.metadata as Record<string, any>) ?? {} });
+      }
+    }
+    return out;
   }
 
   /**

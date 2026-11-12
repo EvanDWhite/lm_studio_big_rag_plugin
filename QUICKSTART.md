@@ -44,7 +44,9 @@ This will start the plugin and register it with LM Studio.
 
 **Note:** Settings → Integrations (gear menu) is only for “skip tool confirmation”. Path settings are **not** there.
 
-For REST/curl: configure paths once in the chat sidebar (same fields as chat). Send **one chat message** so the plugin copies them to `~/.lmstudio/big-rag-tools-config.json` for curl. Or set `BIG_RAG_DOCS_DIR` / `BIG_RAG_DB_DIR` env vars.
+**Stories (recommended):** create a story per title folder (`node dist/cliIndex.js create-story "/path/to/Title"`) and put its id in the chat's **Story ID** field. See README → Story databases. The legacy Documents/Vector Store Directory fields still work when Story ID is empty.
+
+For REST/curl: tools need an explicit `story` argument (there is no synced-config or env-var fallback any more).
 
 **Required Settings:**
 - **Documents Directory**: Path to your documents (e.g., `/Users/yourname/Documents/MyLibrary`)
