@@ -52,6 +52,13 @@ export class VectorStore {
    * after use so GC can free the parsed index data.
    */
   private openShard(dir: string): LocalIndex {
+    // vectra's LocalIndex caches index.json in memory and endUpdate() writes that cache back.
+    // A second instance for the ACTIVE shard would delete from its own copy, and the next
+    // addChunks() on activeShard would write the stale cache back, resurrecting deleted chunks
+    // (pruned files and orphan chunks of changed files). Always reuse the active instance.
+    if (this.activeShard && dir === this.shardDirs[this.shardDirs.length - 1]) {
+      return this.activeShard;
+    }
     const fullPath = path.join(this.dbPath, dir);
     return new LocalIndex(fullPath);
   }

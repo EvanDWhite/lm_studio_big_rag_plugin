@@ -141,7 +141,7 @@ Each **story** is its own isolated database: one title folder → one index. Two
 
 **Creating a story from the chat:** toggle **Create story from title folder**, fill in **New story: title folder** (optional: id, exclude patterns, embedding model), send any message. Then select it via Story ID override (or the dropdown after a reload) and turn the toggle off. Indexing starts on the first message with the story selected.
 
-Open product decisions (REST story argument, overlapping folders, default excludes) are single switches in `src/stories/policy.ts`.
+Open product decisions (REST story argument, overlapping folders, default excludes, prune brake) are single switches in `src/stories/policy.ts`.
 
 - **Stories Root** (global plugin setting): where story databases live. Empty = `$BIG_RAG_STORIES_ROOT`, else `~/.lmstudio/big-rag-stories`.
 - Layout: `<root>/stories/<storyId>/story.json` (manifest), `index/` (Vectra shards), `.big-rag-failures.json`.
@@ -158,6 +158,57 @@ Open product decisions (REST story argument, overlapping folders, default exclud
 - `story.json` holds the story's source folders (`titleDir` + `sourceDirs`, default `["."]`), `excludePatterns`, `additionalExtensions`, embedding model + dimensions, chunk settings, OCR flag and stats. Edit it to change per-story settings; reindex after changing model or chunking.
 - Every chunk is stamped with `metadata.storyId`; search drops anything not stamped for the chat's story. Reindexing a story also prunes chunks for files that were deleted, moved out, or are now excluded (skipped if a source folder is missing).
 - **Fail closed:** if no story is selected and the legacy paths are not both set, or the selected story does not exist, Big RAG does nothing (no indexing, no search) and the message goes to the model unchanged.
+
+### Adopting an existing store as a story (no re-embedding)
+
+If you already have a Big RAG vector store for a title, `adopt-store` turns it into a story without embedding anything again:
+
+```bash
+npm run build
+# 1. Look first. Writes nothing.
+node dist/cliIndex.js adopt-store --store "/path/to/old/vector-store" "/path/to/Title Folder" --dry-run
+# 2. Adopt. Copies the store, so the original stays untouched as a backup.
+node dist/cliIndex.js adopt-store --store "/path/to/old/vector-store" "/path/to/Title Folder"
+```
+
+- **Auto-detected:**
+  - the embedding model (from the store's `.big-rag-embedding.json`)
+  - dimensions (from the vectors)
+  - chunk size and overlap (inferred from chunk word offsets)
+  - the old documents folder (the common folder of all chunk paths)
+  - a path remap, if the documents have moved since indexing
+- **Needed from you:** `--store` and the title folder. You also need `--model` if the store has no `.big-rag-embedding.json`.
+- **The dry run reports:**
+  - detected settings and where each came from
+  - chunk and file counts
+  - how many map inside vs outside the title folder
+  - excluded (`chapter_raw`) chunks
+  - what the **first reindex** would skip, re-embed, embed new, or **prune**, with a clear ⚠ warning before anything would be pruned
+- **What it does:**
+  - copies `shard_*` into `<root>/stories/<id>/index/`
+  - rewrites ids to `<id>:<oldId>`
+  - stamps `metadata.storyId`
+  - makes paths relative to the title folder, adding `subfolder`
+  - verifies chunk count, stamps and vectors
+  - writes `story.json` last (with a `migration` record)
+
+  Vectors are byte-identical.
+- **Options:**
+  - `--id`, `--name`
+  - `--exclude <glob>`: repeatable; the default is `**/chapter_raw/**`
+  - `--chunk-size`/`--chunk-overlap`: override the inferred values
+  - `--path-map OLD=NEW`: repeatable
+  - `--no-auto-map`
+  - `--stories-root`
+  - `--prune`: drop chunks the first reindex would prune (outside the title folder, excluded, deleted). Off by default.
+  - `--move`: move the original store instead of copying it. Off by default.
+- After adopting, keep **Skip Previously Indexed** ON for the first reindex. Unchanged files are skipped; only changed and new files are embedded.
+
+**Prune safety:**
+- Story reindexing prunes chunks for files that left the sources, and shows a ⚠ status listing them first.
+- It skips pruning entirely if more than half of a story's indexed files (4 or more) would go. This usually means a wrong or unmounted folder. Tune this with `maxPruneFraction` in `src/stories/policy.ts`.
+
+Story chunk paths are stored relative to the title folder (e.g. `characters/mira.md`), and citations show that path. Stories indexed before this change keep their absolute paths and keep working.
 
 **Legacy single-store mode** still works: leave Story at None and Story ID override empty, and set both **Documents Directory (legacy)** and **Vector Store Directory (legacy)**. Fields marked *(legacy)* apply only in that mode; stories take them from `story.json`.
 

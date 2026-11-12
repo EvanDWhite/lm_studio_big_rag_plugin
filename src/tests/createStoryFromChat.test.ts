@@ -71,8 +71,9 @@ test("create from chat, then select via override: indexes the title folder minus
 
   const store = new VectorStore(loaded.story.indexDir);
   await store.initialize();
-  const files = Array.from(new Set((await store.listChunks()).map((c) => path.relative(titleDir, c.metadata.filePath)))).sort();
-  assert.deepEqual(files, [path.join("chapter_md", "01.md"), path.join("characters", "mira.md")]);
+  const files = Array.from(new Set((await store.listChunks()).map((c) => String(c.metadata.filePath)))).sort();
+  assert.deepEqual(files, ["chapter_md/01.md", "characters/mira.md"]);
+  assert.ok(prompt.includes("from chapter_md/01.md") || prompt.includes("from characters/mira.md"), "citations show relative paths");
 });
 
 test("custom id and excludes from the chat fields are honored", async () => {

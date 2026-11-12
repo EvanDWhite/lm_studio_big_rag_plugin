@@ -13,6 +13,7 @@ import {
   type StoryHandle,
 } from "./stories/storyRegistry";
 import { type IndexingProgress } from "./ingestion/indexManager";
+import { AdoptStoreError, adoptLegacyStore, formatAdoptReport, parsePathMap } from "./stories/adoptStore";
 
 const USAGE = `Big RAG CLI
 
@@ -20,6 +21,11 @@ Stories (one isolated database per title folder):
   node dist/cliIndex.js create-story <titleDir> [--id <id>] [--name <displayName>] [--model <embeddingModel>]
         [--exclude <glob>]... [--chunk-size N] [--chunk-overlap N] [--index-dir <path> --accept-unstamped]
         (default: index every subfolder of <titleDir> except **/chapter_raw/**)
+  node dist/cliIndex.js adopt-store --store <oldVectorStoreDir> <titleDir> [--dry-run] [--id <id>] [--name <displayName>]
+        [--model <embeddingModel>] [--chunk-size N --chunk-overlap N] [--exclude <glob>]...
+        [--path-map <OLD=NEW>]... [--no-auto-map] [--prune] [--move]
+        Adopts an existing (pre-story) store as a new story WITHOUT re-embedding. Copies by default;
+        the original store is only touched with --move. Run with --dry-run first.
   node dist/cliIndex.js list-stories
   node dist/cliIndex.js index --story <id> [--force]
 
@@ -35,7 +41,7 @@ interface ParsedArgs {
   flags: Map<string, string[]>;
 }
 
-const BOOLEAN_FLAGS = new Set(["force", "accept-unstamped", "help"]);
+const BOOLEAN_FLAGS = new Set(["force", "accept-unstamped", "help", "dry-run", "move", "prune", "no-auto-map"]);
 
 function parseArgs(argv: string[]): ParsedArgs {
   const positional: string[] = [];
@@ -159,6 +165,51 @@ async function main(): Promise<void> {
     });
     console.log(`[BigRAG CLI] Created story "${story.id}" at ${story.manifestPath}`);
     console.log(`[BigRAG CLI] Set "Story ID" to ${story.id} in a chat's Big RAG settings to use it.`);
+    return;
+  }
+
+  if (command === "adopt-store") {
+    const storeDir = flag(args, "store");
+    const titleDir = args.positional[0];
+    if (!storeDir || !titleDir) throw new Error(`adopt-store needs --store <oldVectorStoreDir> and <titleDir>\n\n${USAGE}`);
+    const dryRun = flag(args, "dry-run") === "true";
+    try {
+      const report = await adoptLegacyStore({
+        storeDir,
+        titleDir,
+        storiesRoot,
+        id: flag(args, "id"),
+        displayName: flag(args, "name"),
+        embeddingModelId: flag(args, "model"),
+        chunkSize: numFlag(args, "chunk-size"),
+        chunkOverlap: numFlag(args, "chunk-overlap"),
+        excludePatterns: args.flags.get("exclude"),
+        pathMaps: (args.flags.get("path-map") ?? []).map(parsePathMap),
+        autoPathMap: flag(args, "no-auto-map") !== "true",
+        mode: flag(args, "move") === "true" ? "move" : "copy",
+        prune: flag(args, "prune") === "true",
+        dryRun,
+      });
+      console.log(formatAdoptReport(report));
+      if (dryRun) {
+        console.log(
+          report.errors.length > 0
+            ? "\nDry run: the real run would REFUSE (see above). Nothing was written."
+            : "\nDry run OK. Nothing was written. Rerun without --dry-run to adopt.",
+        );
+        if (report.errors.length > 0) process.exitCode = 2;
+      } else {
+        console.log(`\nAdopted ${report.chunksAdopted} chunks into story "${report.storyId}" (${report.storyDir}).`);
+        console.log(`Pick "${report.displayName}" in a chat's Big RAG "Story" dropdown (restart the plugin to refresh it) or type Story ID ${report.storyId}.`);
+      }
+    } catch (e) {
+      if (e instanceof AdoptStoreError) {
+        console.error(`[BigRAG CLI] adopt-store: ${e.message}`);
+        process.exitCode = 2;
+        return;
+      }
+      throw e;
+    }
     return;
   }
 

@@ -124,6 +124,17 @@ Citation 2 explains that "Machine learning is a subset of AI."
    ```
 3. Send a query to trigger indexing
 
+### Already have a Big RAG store for a title?
+
+Adopt it as a story instead of re-indexing. Nothing gets re-embedded, and the original is copied, not changed:
+
+```bash
+node dist/cliIndex.js adopt-store --store "/path/to/old/vector-store" "/path/to/Title Folder" --dry-run   # look first
+node dist/cliIndex.js adopt-store --store "/path/to/old/vector-store" "/path/to/Title Folder"
+```
+
+See "Adopting an existing store" in README.md.
+
 ### Optimize Settings
 
 Based on your dataset:

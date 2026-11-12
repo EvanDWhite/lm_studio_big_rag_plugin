@@ -28,6 +28,12 @@ export interface StoryPolicy {
    * "**\/chapter_raw/**" excludes chapter_raw at any depth; use "chapter_raw/**" for top level only.
    */
   defaultExcludePatterns: readonly string[];
+  /**
+   * Safety brake for story reindexing: if more than this fraction of a story's indexed files would
+   * be pruned in one run (and at least 4 files are indexed), pruning is SKIPPED and a warning is
+   * shown instead (usually a wrong/unmounted title folder or a bad exclude). 1 disables the brake.
+   */
+  maxPruneFraction: number;
 }
 
 export const DEFAULT_STORY_POLICY: Readonly<StoryPolicy> = Object.freeze({
@@ -35,6 +41,7 @@ export const DEFAULT_STORY_POLICY: Readonly<StoryPolicy> = Object.freeze({
   allowToolStoryArgOverride: false,
   rejectOverlappingSources: true,
   defaultExcludePatterns: Object.freeze(["**/chapter_raw/**"]),
+  maxPruneFraction: 0.5,
 });
 
 export function getStoryPolicy(): Readonly<StoryPolicy> {

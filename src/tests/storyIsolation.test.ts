@@ -53,8 +53,12 @@ async function chunksIn(story: StoryHandle) {
   return chunks;
 }
 
-function relFiles(chunks: Array<{ metadata: Record<string, any> }>, titleDir: string): string[] {
-  return Array.from(new Set(chunks.map((c) => path.relative(titleDir, c.metadata.filePath).split(path.sep).join("/")))).sort();
+/** Story chunks store paths relative to the title folder (posix). */
+function relFiles(chunks: Array<{ metadata: Record<string, any> }>, _titleDir: string): string[] {
+  for (const c of chunks) {
+    assert.ok(!path.isAbsolute(c.metadata.filePath), `expected relative path, got ${c.metadata.filePath}`);
+  }
+  return Array.from(new Set(chunks.map((c) => String(c.metadata.filePath)))).sort();
 }
 
 before(async () => {
@@ -106,8 +110,9 @@ test("two story chats index concurrently, each only into its own store", async (
       assert.ok(c.id.startsWith(`${story.id}:`), "chunk ids are namespaced by story");
       assert.ok(String(c.metadata.text).includes(token));
       assert.ok(!String(c.metadata.text).includes(foreign));
-      assert.ok(!String(c.metadata.filePath).includes(`${path.sep}chapter_raw${path.sep}`), "chapter_raw indexed");
-      assert.ok(String(c.metadata.filePath).startsWith(story.sourceDirs[0] + path.sep));
+      assert.ok(!String(c.metadata.filePath).split("/").includes("chapter_raw"), "chapter_raw indexed");
+      assert.ok(!path.isAbsolute(c.metadata.filePath), "story paths are relative to the title folder");
+      assert.equal(c.metadata.subfolder, String(c.metadata.filePath).split("/")[0]);
     }
     assert.deepEqual(relFiles(chunks, story.sourceDirs[0]), [
       "chapter_md/ch01.md",

@@ -9,6 +9,7 @@ import { calculateFileHash } from "../utils/fileHash";
 import { type EmbeddingDynamicHandle, type LMStudioClient } from "@lmstudio/sdk";
 import { FailedFileRegistry } from "../utils/failedFileRegistry";
 import { coerceEmbeddingVector } from "../utils/coerceEmbedding";
+import { subfolderOf, toAbsolutePath, toStoredPath } from "../stories/storyPaths";
 
 const EXCLUDE_PROGRESS_THROTTLE = 40;
 
@@ -64,6 +65,10 @@ export interface IndexingOptions {
   failureRegistryPath?: string;
   /** Delete chunks for files that are no longer found under the source dirs (or now excluded). */
   pruneMissingFiles?: boolean;
+  /** Store chunk paths relative to this folder (story title folder). Omit = absolute paths. */
+  pathBase?: string;
+  /** Skip pruning (with a warning) when more than this fraction of indexed files would go. Default 1 (off). */
+  maxPruneFraction?: number;
 }
 
 type FailureReason = ParseFailureReason | "index.chunk-empty" | "index.vector-add-error";
@@ -89,7 +94,18 @@ export class IndexManager {
     const { documentsDirs, vectorStore, onProgress } = this.options;
 
     try {
-      const fileInventory = await vectorStore.getFileHashInventory();
+      // Inventory keyed by ABSOLUTE path (stored paths may be relative to pathBase);
+      // storedKeys remembers the stored form(s) for deletes.
+      const storedInventory = await vectorStore.getFileHashInventory();
+      const fileInventory = new Map<string, Set<string>>();
+      const storedKeys = new Map<string, string[]>();
+      for (const [storedPath, hashes] of storedInventory) {
+        const absolute = toAbsolutePath(storedPath, this.options.pathBase);
+        const merged = fileInventory.get(absolute) ?? new Set<string>();
+        hashes.forEach((h) => merged.add(h));
+        fileInventory.set(absolute, merged);
+        storedKeys.set(absolute, [...(storedKeys.get(absolute) ?? []), storedPath]);
+      }
 
       // Step 1: Scan directory
       if (onProgress) {
@@ -173,7 +189,7 @@ export class IndexManager {
             : ""),
       );
 
-      const prunedCount = await this.pruneMissingFiles(files, fileInventory);
+      const prunedCount = await this.pruneMissingFiles(files, fileInventory, storedKeys, onProgress);
 
       // Step 2: Index files
       let processedCount = 0;
@@ -331,11 +347,12 @@ export class IndexManager {
     const { vectorStore, embeddingModel, client, chunkSize, chunkOverlap, enableOCR, autoReindex } =
       this.options;
 
+    const storedPath = toStoredPath(file.path, this.options.pathBase);
     let fileHash: string | undefined;
     try {
       // Calculate file hash
       fileHash = await calculateFileHash(file.path);
-      const existingHashes = fileInventory.get(file.path);
+      const existingHashes = fileInventory.get(path.resolve(file.path));
       const hasSeenBefore = existingHashes !== undefined && existingHashes.size > 0;
       const hasSameHash = existingHashes?.has(fileHash) ?? false;
 
@@ -402,11 +419,12 @@ export class IndexManager {
           const embedding = coerceEmbeddingVector(embeddingResult.embedding);
           
           const storyId = this.options.storyId;
+          const subfolder = subfolderOf(storedPath);
           documentChunks.push({
             id: storyId ? `${storyId}:${fileHash}-${i}` : `${fileHash}-${i}`,
             text: chunk.text,
             vector: embedding,
-            filePath: file.path,
+            filePath: storedPath,
             fileName: file.name,
             fileHash,
             chunkIndex: i,
@@ -417,6 +435,7 @@ export class IndexManager {
               startIndex: chunk.startIndex,
               endIndex: chunk.endIndex,
               ...(storyId ? { storyId } : {}),
+              ...(subfolder ? { subfolder } : {}),
             },
           });
         } catch (error) {
@@ -442,12 +461,12 @@ export class IndexManager {
         // Deleting first would wipe the prior index if addChunks failed.
         await vectorStore.addChunks(documentChunks);
         await vectorStore.deleteOrphanChunksForFilePath(
-          file.path,
+          storedPath,
           fileHash,
           new Set(documentChunks.map((c) => c.id)),
         );
         console.log(`Indexed ${documentChunks.length} chunks from ${file.name}`);
-        fileInventory.set(file.path, new Set([fileHash]));
+        fileInventory.set(path.resolve(file.path), new Set([fileHash]));
         await this.failedFileRegistry.clearFailure(file.path);
         return {
           type: "indexed",
@@ -487,6 +506,8 @@ export class IndexManager {
   private async pruneMissingFiles(
     files: ScannedFile[],
     fileInventory: Map<string, Set<string>>,
+    storedKeys: Map<string, string[]>,
+    onProgress?: (progress: IndexingProgress) => void,
   ): Promise<number> {
     if (!this.options.pruneMissingFiles || fileInventory.size === 0) {
       return 0;
@@ -499,13 +520,35 @@ export class IndexManager {
       return 0;
     }
     const scanned = new Set(files.map((f) => path.resolve(f.path)));
+    const missing = Array.from(fileInventory.keys()).filter((p) => !scanned.has(p));
+    if (missing.length === 0) {
+      return 0;
+    }
+    const maxFraction = this.options.maxPruneFraction ?? 1;
+    const shown = missing.slice(0, 5).map((p) => toStoredPath(p, this.options.pathBase)).join(", ");
+    if (fileInventory.size >= 4 && missing.length > maxFraction * fileInventory.size) {
+      const message =
+        `⚠ NOT pruning: ${missing.length} of ${fileInventory.size} indexed files are no longer in the sources ` +
+        `(e.g. ${shown}). That looks like a wrong or missing folder; fix it, or remove the chunks deliberately.`;
+      console.warn(`[BigRAG] ${message}`);
+      onProgress?.({ totalFiles: 0, processedFiles: 0, currentFile: message, status: "scanning" });
+      return 0;
+    }
+    onProgress?.({
+      totalFiles: 0,
+      processedFiles: 0,
+      currentFile: `⚠ Pruning ${missing.length} file(s) no longer in sources: ${shown}${missing.length > 5 ? ", …" : ""}`,
+      status: "scanning",
+    });
     let pruned = 0;
-    for (const storedPath of Array.from(fileInventory.keys())) {
-      if (!scanned.has(path.resolve(storedPath))) {
-        await this.options.vectorStore.deleteByFilePath(storedPath);
-        fileInventory.delete(storedPath);
+    for (const absolutePath of missing) {
+      {
+        for (const storedPath of storedKeys.get(absolutePath) ?? [absolutePath]) {
+          await this.options.vectorStore.deleteByFilePath(storedPath);
+        }
+        fileInventory.delete(absolutePath);
         pruned++;
-        console.log(`[BigRAG] Pruned chunks for file no longer in sources: ${storedPath}`);
+        console.log(`[BigRAG] Pruned chunks for file no longer in sources: ${absolutePath}`);
       }
     }
     return pruned;

@@ -3,6 +3,7 @@ import { IndexManager, type IndexingProgress, type IndexingResult } from "./inde
 import { VectorStore } from "../vectorstore/vectorStore";
 import { syncEmbeddingManifestAfterIndexing, readEmbeddingIndexManifest } from "../utils/embeddingIndexManifest";
 import { resolveAdditionalExtensions } from "../utils/additionalExtensions";
+import { getStoryPolicy } from "../stories/policy";
 import { updateStoryAfterIndexing, type StoryHandle } from "../stories/storyRegistry";
 
 export interface RunIndexingParams {
@@ -81,6 +82,8 @@ export async function runIndexingJob({
     storyId: story.chunkStamp,
     failureRegistryPath: story.failureRegistryPath,
     pruneMissingFiles: story.pruneMissingFiles,
+    pathBase: story.pathBase,
+    maxPruneFraction: getStoryPolicy().maxPruneFraction,
   });
 
   try {

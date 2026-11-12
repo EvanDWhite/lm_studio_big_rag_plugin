@@ -121,7 +121,10 @@ export function formatRagContext(passages: RetrievedPassage[]): RagContextBlocks
 
   let citationNumber = 1;
   for (const passage of passages) {
-    const fileName = path.basename(passage.filePath);
+    // Story chunks store paths relative to the title folder: show them ("characters/hero.md").
+    const fileName = path.isAbsolute(passage.filePath) || passage.filePath === ""
+      ? path.basename(passage.filePath)
+      : passage.filePath;
     const citationLabel =
       `Citation ${citationNumber} (from ${fileName}, score: ${passage.score.toFixed(3)}): `;
     ragContextFull += `\n${citationLabel}"${passage.text}"\n\n`;

@@ -52,6 +52,18 @@ export interface StoryManifest {
    */
   acceptUnstampedChunks: boolean;
   stats: { totalChunks: number; uniqueFiles: number; lastIndexedAt: string | null };
+  /** Set when the story was adopted from a legacy store (scripts: `adopt-store`). */
+  migration?: StoryMigrationInfo;
+}
+
+export interface StoryMigrationInfo {
+  sourceStore: string;
+  migratedAt: string;
+  mode: "copy" | "move";
+  chunkingSource: "inferred" | "flag" | "default";
+  embeddingSource: "manifest" | "flag";
+  chunksAdopted: number;
+  chunksDropped: number;
 }
 
 /** Everything indexing/retrieval needs, resolved to absolute paths. Passed explicitly everywhere. */
@@ -76,6 +88,8 @@ export interface StoryHandle {
   acceptUnstampedChunks: boolean;
   /** Prune chunks for files no longer under the source dirs (stories only). */
   pruneMissingFiles: boolean;
+  /** Chunk paths are stored relative to this folder (the title folder); undefined = absolute. */
+  pathBase?: string;
   manifestPath?: string;
 }
 
@@ -198,6 +212,9 @@ export function normalizeStoryManifest(raw: unknown, expectedId: string): StoryM
       uniqueFiles: asPositiveInt(stats.uniqueFiles, 0),
       lastIndexedAt: typeof stats.lastIndexedAt === "string" ? stats.lastIndexedAt : null,
     },
+    ...(typeof r.migration === "object" && r.migration !== null
+      ? { migration: r.migration as StoryMigrationInfo }
+      : {}),
   };
 }
 
@@ -226,6 +243,7 @@ export function storyHandleFromManifest(storyDir: string, manifest: StoryManifes
     chunkStamp: manifest.id,
     acceptUnstampedChunks: manifest.acceptUnstampedChunks,
     pruneMissingFiles: true,
+    pathBase: base,
     manifestPath: path.join(storyDir, STORY_MANIFEST_FILENAME),
   };
 }
@@ -281,6 +299,27 @@ export async function createStory(
   options: CreateStoryOptions,
   policy: Readonly<StoryPolicy> = getStoryPolicy(),
 ): Promise<StoryHandle> {
+  const prepared = await prepareNewStory(storiesRoot, options, policy);
+  await writeJsonAtomic(prepared.manifestPath, prepared.manifest);
+  return prepared.story;
+}
+
+export interface PreparedStory {
+  storyDir: string;
+  manifestPath: string;
+  manifest: StoryManifest;
+  story: StoryHandle;
+}
+
+/**
+ * Validate a new story (id, no existing story, no overlap per policy) and build its manifest
+ * without writing anything.
+ */
+export async function prepareNewStory(
+  storiesRoot: string,
+  options: CreateStoryOptions,
+  policy: Readonly<StoryPolicy> = getStoryPolicy(),
+): Promise<PreparedStory> {
   const id = options.id ?? (options.titleDir ? slugifyStoryId(path.basename(path.resolve(options.titleDir))) : "");
   const storyDir = getStoryDir(storiesRoot, id);
   const manifestPath = path.join(storyDir, STORY_MANIFEST_FILENAME);
@@ -308,11 +347,11 @@ export async function createStory(
   if (typeof manifest === "string") {
     throw new Error(`Cannot create story "${id}": ${manifest}.`);
   }
+  const story = storyHandleFromManifest(storyDir, manifest);
   if (policy.rejectOverlappingSources) {
-    await assertNoTitleOverlap(storiesRoot, id, storyHandleFromManifest(storyDir, manifest).sourceDirs);
+    await assertNoTitleOverlap(storiesRoot, id, story.sourceDirs);
   }
-  await writeJsonAtomic(manifestPath, manifest);
-  return storyHandleFromManifest(storyDir, manifest);
+  return { storyDir, manifestPath, manifest, story };
 }
 
 export async function listStories(storiesRoot: string): Promise<StoryHandle[]> {

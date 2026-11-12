@@ -35,6 +35,7 @@ test("defaults: tool arg only when chat has none; no override; overlaps rejected
     allowToolStoryArgOverride: false,
     rejectOverlappingSources: true,
     defaultExcludePatterns: ["**/chapter_raw/**"],
+    maxPruneFraction: 0.5,
   });
 });
 
